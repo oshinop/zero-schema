@@ -1,0 +1,19 @@
+error: range endpoints must be capture-free constant expressions
+ --> tests/ui/fail/10_expression_rejections.rs:2:49
+  |
+2 | #[derive(ZeroSchema)] struct Bad { #[zero(range=(|x|x)(0)..=2)] a:u32, #[zero(must_equal=n!())] b:u32, #[zero(must_equal=Self::X)] c:...
+  |                                                 ^^^^^^
+
+error: must_equal must be a capture-free constant expression
+ --> tests/ui/fail/10_expression_rejections.rs:2:90
+  |
+2 | #[derive(ZeroSchema)] struct Bad { #[zero(range=(|x|x)(0)..=2)] a:u32, #[zero(must_equal=n!())] b:u32, #[zero(must_equal=Self::X)] c:...
+  |                                                                                          ^
+
+warning: unused macro definition: `n`
+ --> tests/ui/fail/10_expression_rejections.rs:1:50
+  |
+1 | use zero_schema_derive::ZeroSchema; macro_rules! n {()=>{1}}
+  |                                                  ^
+  |
+  = note: `#[warn(unused_macros)]` on by default

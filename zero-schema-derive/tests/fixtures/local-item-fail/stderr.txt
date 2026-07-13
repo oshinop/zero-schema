@@ -1,0 +1,3 @@
+cannot find type `Tag` in this scope
+names from parent modules are not accessible without an explicit import
+#[deny(proc_macro_derive_resolution_fallback)]

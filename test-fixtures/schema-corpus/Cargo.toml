@@ -1,0 +1,12 @@
+[package]
+name = "zero-schema-schema-corpus"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+zero-schema = { path = "../..", default-features = false, features = ["derive"] }
+zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+sha2 = "=0.11.0"
+widestring = { version = "=1.2.1", default-features = false }

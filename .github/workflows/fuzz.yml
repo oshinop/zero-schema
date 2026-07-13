@@ -1,0 +1,64 @@
+name: Reusable fuzz
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+
+  fuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse_message, parse_external_tag, parse_all_strings, roundtrip_message]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install nightly-2025-11-15 --profile minimal
+      - run: cargo +nightly-2025-11-15 install --locked --version 0.13.2 cargo-fuzz
+      - run: cargo +nightly-2025-11-15 metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 >/dev/null
+      - run: cargo +nightly-2025-11-15 test --locked --manifest-path fuzz/Cargo.toml --lib
+      - name: Run fuzz target and record deterministic evidence
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p target/fuzz-evidence
+          before=$(shasum -a 256 fuzz/Cargo.lock | cut -d ' ' -f 1)
+          ci/run-fuzz.sh "$TARGET"
+          after=$(shasum -a 256 fuzz/Cargo.lock | cut -d ' ' -f 1)
+          test "$before" = "$after"
+          evidence="target/fuzz-evidence/${TARGET}-${GITHUB_SHA}.txt"
+          {
+            printf 'target=%s\nruns=10000\nlock_sha_before=%s\nlock_sha_after=%s\n' "$TARGET" "$before" "$after"
+            rustc +nightly-2025-11-15 -vV
+            cargo +nightly-2025-11-15 -V
+            cargo +nightly-2025-11-15 fuzz --version
+          } > "$evidence"
+          test -s "$evidence"
+      - name: Verify immutable corpora and clean artifacts
+        if: always()
+        run: ci/check-fuzz-clean.sh
+      - name: Upload fuzz evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.sha }}
+          overwrite: true
+          path: |
+            target/fuzz-evidence/${{ matrix.target }}-${{ github.sha }}.txt
+            target/fuzz-artifacts
+            fuzz/artifacts
+          if-no-files-found: error
+          retention-days: 90
+
+  gate:
+    if: always()
+    needs: [fuzz]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all four fuzz targets
+        env:
+          FUZZ: ${{ needs.fuzz.result }}
+        run: test "$FUZZ" = success

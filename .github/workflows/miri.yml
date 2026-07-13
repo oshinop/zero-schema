@@ -1,0 +1,25 @@
+name: Reusable Miri
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install nightly-2025-11-15 --profile minimal --component miri
+      - run: rustc +nightly-2025-11-15 -vV && cargo +nightly-2025-11-15 -V
+      - run: cargo +nightly-2025-11-15 miri test --locked -p zero-schema --test miri --all-features
+  gate:
+    if: always()
+    needs: [miri]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require focused Miri
+        env:
+          RESULT: ${{ needs.miri.result }}
+        run: test "$RESULT" = success

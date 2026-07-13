@@ -1,0 +1,23 @@
+error: capacity must be an unsuffixed integer literal
+ --> tests/ui/fail/06_capacity_align.rs:2:102
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { #[zero(capacity=256, len_type=u8)] a:&'a str, #[zero(capacity=1u32)] b:&'a str, #[zero(align=3...
+  |                                                                                                      ^^^^
+
+error: alignment must be a power of two no greater than 2^29
+ --> tests/ui/fail/06_capacity_align.rs:2:133
+  |
+2 | ...=u8)] a:&'a str, #[zero(capacity=1u32)] b:&'a str, #[zero(align=3)] c:u32 }
+  |                                                                    ^
+
+error: capacity exceeds len_type maximum
+ --> tests/ui/fail/06_capacity_align.rs:2:56
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { #[zero(capacity=256, len_type=u8)] a:&'a str, #[zero(capacity=1u32)] b:&'a str, #[zero(align=3...
+  |                                                        ^^^
+
+error: string fields require `capacity`
+ --> tests/ui/fail/06_capacity_align.rs:2:111
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { #[zero(capacity=256, len_type=u8)] a:&'a str, #[zero(capacity=1u32)] b:&'a str, #[zero(align=3...
+  |                                                                                                               ^

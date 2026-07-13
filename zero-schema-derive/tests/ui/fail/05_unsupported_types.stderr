@@ -1,0 +1,17 @@
+error: string fields require `capacity`
+ --> tests/ui/fail/05_unsupported_types.rs:2:42
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { a:&'static str, b:&'a mut str, c:&'a [u8], d:(u8,u8), e:[u8;3] }
+  |                                          ^
+
+error: borrowed views require a named, non-'static lifetime
+ --> tests/ui/fail/05_unsupported_types.rs:2:43
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { a:&'static str, b:&'a mut str, c:&'a [u8], d:(u8,u8), e:[u8;3] }
+  |                                           ^^^^^^^
+
+error: borrowed view lifetime must equal the selected borrow lifetime or be reachable through its outlives chain
+ --> tests/ui/fail/05_unsupported_types.rs:2:43
+  |
+2 | #[derive(ZeroSchema)] struct Bad<'a> { a:&'static str, b:&'a mut str, c:&'a [u8], d:(u8,u8), e:[u8;3] }
+  |                                           ^^^^^^^

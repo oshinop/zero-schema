@@ -1,0 +1,10 @@
+[package]
+name="zero-schema-ui-missing-zerocopy"
+version="0.0.0"
+edition="2024"
+rust-version="1.85"
+publish=false
+[workspace]
+[dependencies]
+zero-schema-derive={path="../../.."}
+zs={package="zero-schema",path="../../../..",default-features=false}

@@ -1,0 +1,29 @@
+[package]
+name = "zero-schema-wide-endian"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[features]
+default = []
+explicit-little-u16str = []
+explicit-big-u16str = []
+inherited-little-u16str = []
+inherited-big-u16str = []
+native-over-little-u16str = []
+native-over-big-u16str = []
+explicit-little-u16cstr = []
+explicit-big-u16cstr = []
+inherited-little-u16cstr = []
+inherited-big-u16cstr = []
+native-over-little-u16cstr = []
+native-over-big-u16cstr = []
+
+[dependencies]
+zero-schema = { path = "../..", default-features = false, features = ["derive"] }
+widestring = { version = "=1.2.1", default-features = false }
+zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }

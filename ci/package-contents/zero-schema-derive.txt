@@ -1,0 +1,11 @@
+.cargo_vcs_info.json
+Cargo.lock
+Cargo.toml
+Cargo.toml.orig
+LICENSE
+src/gen.rs
+src/gen_struct.rs
+src/gen_tagged.rs
+src/ir.rs
+src/lib.rs
+src/parse.rs

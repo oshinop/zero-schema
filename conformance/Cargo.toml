@@ -1,0 +1,23 @@
+[package]
+name = "zero-schema-conformance"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+zero-schema = { path = "..", default-features = false, features = ["std", "derive"] }
+zero-schema-schema-corpus = { path = "../test-fixtures/schema-corpus", default-features = false }
+widestring = { version = "=1.2.1", default-features = false }
+
+[dev-dependencies]
+sha2 = "=0.11.0"
+criterion = "=0.7.0"
+
+[build-dependencies]
+cc = "=1.2.67"
+syn = { version = "=2.0.118", default-features = false, features = ["derive", "full", "parsing"] }
+
+[[bench]]
+name = "cpp_codec"
+harness = false

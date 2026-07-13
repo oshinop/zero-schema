@@ -1,0 +1,28 @@
+name: Verification
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+  miri:
+    uses: ./.github/workflows/miri.yml
+  fuzz:
+    uses: ./.github/workflows/fuzz.yml
+
+  gate:
+    if: always()
+    needs: [ci, miri, fuzz]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require caller-SHA verification gates
+        env:
+          CI: ${{ needs.ci.result }}
+          MIRI: ${{ needs.miri.result }}
+          FUZZ: ${{ needs.fuzz.result }}
+        run: test "$CI" = success && test "$MIRI" = success && test "$FUZZ" = success

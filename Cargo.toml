@@ -1,0 +1,69 @@
+[package]
+name = "zero-schema"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Fixed-layout, zero-copy Rust schemas for shared memory and C++ interoperability"
+documentation = "https://docs.rs/zero-schema"
+readme = "README.md"
+include = ["src/**", "examples/**", "benches/**", "Cargo.toml", "README.md", "TESTING.md", "LICENSE", "SAFETY.md", "CHANGELOG.md"]
+
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "zero-schema-derive",
+    "conformance",
+    "no-std-smoke",
+    "test-fixtures/schema-corpus",
+    "test-fixtures/cross-crate-child",
+    "test-fixtures/cross-crate-consumer",
+]
+exclude = ["fuzz", "target-tests/wide-endian"]
+
+[features]
+default = ["std", "derive"]
+derive = ["dep:zero-schema-derive"]
+alloc = ["zerocopy/alloc"]
+std = ["alloc", "zerocopy/std"]
+
+[dependencies]
+zero-schema-derive = { path = "zero-schema-derive", version = "=0.1.0", optional = true }
+zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+widestring = { version = "=1.2.1", default-features = false }
+
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "none")))'.dev-dependencies]
+zero-schema-schema-corpus = { path = "test-fixtures/schema-corpus", default-features = false }
+zero-schema-cross-crate-child = { path = "test-fixtures/cross-crate-child", default-features = false }
+zero-schema-cross-crate-consumer = { path = "test-fixtures/cross-crate-consumer", default-features = false }
+proptest = "=1.11.0"
+criterion = "=0.7.0"
+sha2 = "=0.11.0"
+
+[[example]]
+name = "records"
+required-features = ["derive"]
+
+[[example]]
+name = "tagged"
+required-features = ["derive"]
+
+[[example]]
+name = "validation_errors"
+required-features = ["derive", "alloc"]
+
+[[example]]
+name = "generic_buffer"
+required-features = ["derive"]
+
+[[example]]
+name = "no_std_wasm"
+required-features = ["derive"]
+
+[[bench]]
+name = "codec"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true

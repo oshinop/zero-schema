@@ -1,0 +1,11 @@
+error: schema structs must contain at least one field
+ --> tests/ui/fail/14_zero_records.rs:1:66
+  |
+1 | use zero_schema_derive::ZeroSchema; #[derive(ZeroSchema)] struct Empty {} #[derive(ZeroSchema)] struct StaticZero { x:[u8;0] } fn mai...
+  |                                                                  ^^^^^
+
+error: Could not find `zerocopy` in `dependencies` or `dev-dependencies` in `$WORKSPACE/target/tests/trybuild/zero-schema-derive/Cargo.toml`!
+ --> tests/ui/fail/14_zero_records.rs:1:104
+  |
+1 | use zero_schema_derive::ZeroSchema; #[derive(ZeroSchema)] struct Empty {} #[derive(ZeroSchema)] struct StaticZero { x:[u8;0] } fn mai...
+  |                                                                                                        ^^^^^^^^^^

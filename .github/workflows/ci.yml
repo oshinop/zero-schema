@@ -1,0 +1,213 @@
+name: Reusable CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+
+jobs:
+  rust:
+    name: Rust checks (${{ matrix.toolchain }})
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.85.0", stable, "1.97.0"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install toolchain
+        run: rustup toolchain install '${{ matrix.toolchain }}' --profile minimal --component rustfmt --component clippy
+      - name: Record toolchain
+        run: rustc +${{ matrix.toolchain }} -vV && cargo +${{ matrix.toolchain }} -V
+      - name: Reject property-test environment overrides
+        shell: bash
+        run: |
+          while IFS='=' read -r name _; do
+            case "$name" in PROPTEST_*) printf 'forbidden property-test override: %s\n' "$name" >&2; exit 1;; esac
+          done < <(env)
+      - name: MSRV checks and tests
+        if: matrix.toolchain == '1.85.0'
+        run: |
+          cargo +1.85.0 check --locked --workspace --all-targets
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features alloc
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features derive
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features 'alloc,derive'
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features std
+          ci/check-derive-dev-features.sh 1.85.0
+          cargo +1.85.0 test --locked --workspace --all-features --exclude zero-schema-derive --lib --tests
+          cargo +1.85.0 test --locked -p zero-schema-derive --lib
+          cargo +1.85.0 test --locked -p zero-schema-derive --test ui
+          cargo +1.85.0 test --locked --doc --workspace
+      - name: Moving stable checks
+        if: matrix.toolchain == 'stable'
+        run: |
+          cargo +stable clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo +stable check --locked --workspace --benches --all-features
+          cargo +stable test --locked --workspace --all-features --exclude zero-schema-derive --lib --tests
+          cargo +stable test --locked -p zero-schema-derive --lib
+          cargo +stable test --locked --doc --workspace
+          RUSTDOCFLAGS='-D warnings' cargo +stable doc --locked --workspace --all-features --no-deps
+      - name: Pinned-toolchain checks
+        if: matrix.toolchain == '1.97.0'
+        run: |
+          cargo +1.97.0 fmt --all -- --check
+          cargo +1.97.0 fmt --manifest-path fuzz/Cargo.toml --all -- --check
+          cargo +1.97.0 fmt --manifest-path target-tests/wide-endian/Cargo.toml --all -- --check
+          cargo +1.97.0 clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo +1.97.0 clippy --locked --manifest-path fuzz/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo +1.97.0 check --locked --workspace --benches --all-features
+          cargo +1.97.0 test --locked -p zero-schema --test error_path_alloc --no-default-features --features 'alloc,derive'
+          cargo +1.97.0 test --locked -p zero-schema --test no_alloc -- --ignored --test-threads=1
+          cargo +1.97.0 test --locked -p zero-schema --test properties
+          cargo +1.97.0 test --locked --doc --workspace
+          RUSTDOCFLAGS='-D warnings' cargo +1.97.0 doc --locked --workspace --all-features --no-deps
+      - name: Upload UI evidence
+        if: matrix.toolchain == '1.85.0' && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ui-${{ github.sha }}
+          overwrite: true
+          path: target/tests/trybuild
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload rustdoc
+        if: matrix.toolchain == '1.97.0'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rustdoc-${{ github.sha }}
+          overwrite: true
+          path: target/doc
+          retention-days: 90
+
+  workflow-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Enforce YAML-aware action allowlist
+        run: ci/check-workflow-uses.sh
+      - name: Test fuzz runner
+        run: ci/test-run-fuzz.sh
+
+
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install 1.85.0 --profile minimal && rustup target add --toolchain 1.85.0 thumbv7em-none-eabihf wasm32v1-none
+      - run: cargo +1.85.0 check --locked -p zero-schema-no-std-smoke --lib --target thumbv7em-none-eabihf
+      - run: cargo +1.85.0 build --locked -p zero-schema-no-std-smoke --bin linked-wasm --target wasm32v1-none --release
+
+  native-cpp:
+    name: Native C++ (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install stable --profile minimal
+      - name: Record Rust toolchain
+        shell: bash
+        run: rustc +stable -vV && cargo +stable -V
+      - name: Run conformance
+        shell: bash
+        run: |
+          cargo +stable test --locked -p zero-schema-conformance --target-dir target/conformance-${{ matrix.os }}
+          mkdir -p target/conformance-${{ matrix.os }}/evidence
+          selected=$(find target/conformance-${{ matrix.os }} -name selected-cxx.txt -type f -print -quit)
+          test -n "$selected"
+          cp "$selected" target/conformance-${{ matrix.os }}/evidence/selected-cxx.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cpp-${{ matrix.os }}-${{ github.sha }}
+          overwrite: true
+          path: target/conformance-${{ matrix.os }}
+          retention-days: 90
+
+
+  pinned-cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Run pinned image gates
+        run: |
+          docker pull debian@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4
+          mkdir -p target/pinned-cross-evidence
+          docker run --rm -v "$PWD:/work" -w /work debian@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4 bash -ceu '
+            rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+            printf "%s\n" "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260630T210956Z bookworm main" > /etc/apt/sources.list
+            test "$(find /etc/apt -type f \( -name "*.list" -o -name "*.sources" \) -print | wc -l)" -eq 1
+            grep -Fx "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260630T210956Z bookworm main" /etc/apt/sources.list
+            apt-get -o Acquire::Check-Valid-Until=false update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++ clang libclang-rt-dev gcc-i686-linux-gnu g++-i686-linux-gnu binutils-i686-linux-gnu libc6-dev-i386-cross gcc-powerpc64-linux-gnu g++-powerpc64-linux-gnu binutils-powerpc64-linux-gnu libc6-dev-ppc64-cross qemu-user curl ca-certificates
+            curl --proto "=https" --tlsv1.2 -fsSLo /tmp/rustup-init https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init
+            echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init" | sha256sum -c -
+            chmod +x /tmp/rustup-init
+            /tmp/rustup-init -y --profile minimal --default-toolchain 1.85.0
+            . "$HOME/.cargo/env"
+            rustup toolchain install 1.97.0 --profile minimal
+            rustup target add --toolchain 1.85.0 i686-unknown-linux-gnu powerpc64-unknown-linux-gnu
+            evidence=/work/target/pinned-cross-evidence/versions.txt
+            { g++ --version; gcc --version; ld --version; i686-linux-gnu-g++ --version; i686-linux-gnu-gcc --version; i686-linux-gnu-ld --version; powerpc64-linux-gnu-g++ --version; powerpc64-linux-gnu-gcc --version; powerpc64-linux-gnu-ld --version; qemu-i386 --version; qemu-ppc64 --version; clang++ --version; rustc +1.85.0 -vV; cargo +1.85.0 -V; rustc +1.97.0 -vV; cargo +1.97.0 -V; } > "$evidence" 2>&1
+            CXX=g++ cargo +1.97.0 test --locked -p zero-schema-conformance --target-dir target/pinned-gcc
+            CXX=clang++ cargo +1.97.0 test --locked -p zero-schema-conformance --target-dir target/pinned-clang
+            CXX=clang++ CXXFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" RUSTFLAGS="-C linker=clang++ -C link-arg=-fsanitize=address -C link-arg=-fsanitize=undefined -C link-arg=-lstdc++" ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" cargo +1.97.0 test --locked -p zero-schema-conformance --target-dir target/pinned-sanitized
+            ci/check-wide-endian.sh big powerpc64-unknown-linux-gnu
+            CC_i686_unknown_linux_gnu=i686-linux-gnu-gcc CXX_i686_unknown_linux_gnu=i686-linux-gnu-g++ AR_i686_unknown_linux_gnu=i686-linux-gnu-ar CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="qemu-i386 -L /usr/i686-linux-gnu" cargo +1.85.0 test --locked -p zero-schema-conformance --target i686-unknown-linux-gnu --target-dir target/conformance-i686
+            CC_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-gcc CXX_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-g++ AR_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-ar CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_LINKER=powerpc64-linux-gnu-gcc CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_RUNNER="qemu-ppc64 -L /usr/powerpc64-linux-gnu" cargo +1.85.0 test --locked -p zero-schema-conformance --target powerpc64-unknown-linux-gnu --target-dir target/conformance-powerpc64
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pinned-cross-${{ github.sha }}
+          overwrite: true
+          path: target/pinned-cross-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  wide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install 1.85.0 --profile minimal && rustup toolchain install 1.97.0 --profile minimal --component clippy
+      - run: ci/check-wide-endian.sh little
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install 1.85.0 --profile minimal && rustup toolchain install 1.97.0 --profile minimal
+      - run: cargo +1.97.0 install --locked --version 0.20.2 cargo-deny
+      - name: Audit all lockfiles
+        run: |
+          cargo +1.97.0 deny --locked --workspace --all-features check
+          cargo +1.97.0 deny --locked --all-features --manifest-path fuzz/Cargo.toml check
+          cargo +1.97.0 deny --locked --all-features --manifest-path target-tests/wide-endian/Cargo.toml check
+      - name: Build package archives
+        run: |
+          mkdir -p target/package
+          cargo +1.97.0 package --registry crates-io --locked --list -p zero-schema-derive > target/package/zero-schema-derive.files
+          diff -u ci/package-contents/zero-schema-derive.txt target/package/zero-schema-derive.files
+          cargo +1.97.0 package --registry crates-io --locked --list -p zero-schema > target/package/zero-schema.files
+          diff -u ci/package-contents/zero-schema.txt target/package/zero-schema.files
+          cargo +1.97.0 package --registry crates-io --locked -p zero-schema-derive -p zero-schema
+          ci/verify-package-pair.sh target/package/zero-schema-derive-0.1.0.crate target/package/zero-schema-0.1.0.crate
+
+  gate:
+    if: always()
+    needs: [rust, workflow-policy, no-std, native-cpp, pinned-cross, wide, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job
+        env:
+          RUST: ${{ needs.rust.result }}
+          WORKFLOW_POLICY: ${{ needs.workflow-policy.result }}
+          NO_STD: ${{ needs.no-std.result }}
+          NATIVE_CPP: ${{ needs.native-cpp.result }}
+          PINNED_CROSS: ${{ needs.pinned-cross.result }}
+          WIDE: ${{ needs.wide.result }}
+          PACKAGE: ${{ needs.package.result }}
+        run: test "$RUST" = success && test "$WORKFLOW_POLICY" = success && test "$NO_STD" = success && test "$NATIVE_CPP" = success && test "$PINNED_CROSS" = success && test "$WIDE" = success && test "$PACKAGE" = success
