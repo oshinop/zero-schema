@@ -1,0 +1,12 @@
+error[E0072]: recursive type `RecursiveArray` has infinite size
+ --> tests/ui/fail/15_recursive_array.rs:1:1
+  |
+1 | struct RecursiveArray {
+  | ^^^^^^^^^^^^^^^^^^^^^
+2 |     children: [RecursiveArray; 1],
+  |                -------------- recursive without indirection
+  |
+help: insert some indirection (e.g., a `Box`, `Rc`, or `&`) to break the cycle
+  |
+2 |     children: [Box<RecursiveArray>; 1],
+  |                ++++              +

@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `data`
+  --> tests/ui/fail/26_collision_variant_methods.rs:15:5
+   |
+15 |     #[allow(non_camel_case_types)]
+   |     ^

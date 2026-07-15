@@ -1,2 +1,0 @@
-Could not find `zerocopy` in `dependencies` or `dev-dependencies`
-struct Consumer { value: u32 }

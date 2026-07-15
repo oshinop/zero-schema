@@ -2,9 +2,10 @@ use zero_schema as zs;
 #[cfg(not(miri))]
 use zero_schema_cross_crate_child::BorrowedChild;
 use zero_schema_cross_crate_child::{
-    BigCode, ChildMessage, DirectChild, GenericBytes, LittleCode, NativeCode, TrailingProjection,
+    BigCode, ChildMessage, ChildTag, DirectChild, GenericBytes, LittleCode, NativeCode,
+    OptionalChild, OptionalChildPatch, OptionalCode, TrailingProjection,
 };
-use zs::{ErrorKind, ErrorPathSegment, LayoutError, SchemaError, ZeroSchema};
+use zs::{ErrorKind, ErrorPathSegment, LayoutError, SchemaError, zero};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ErrorFacts {
@@ -39,106 +40,117 @@ fn facts<E: SchemaError>(error: E) -> ErrorFacts {
     }
 }
 
-pub fn encode_big(value: BigCode) -> [u8; 2] {
-    value.encode().unwrap().as_bytes().try_into().unwrap()
-}
-
-pub fn encode_little(value: LittleCode) -> [u8; 4] {
-    value.encode().unwrap().as_bytes().try_into().unwrap()
-}
-
-pub fn encode_native(value: NativeCode) -> [u8; 4] {
-    value.encode().unwrap().as_bytes().try_into().unwrap()
-}
-
-pub fn parse_big(bytes: &[u8]) -> Result<u16, ErrorFacts> {
-    let mut buffer = zs::make_buffer_for!(BigCode);
-    if bytes.len() == buffer.as_bytes().len() {
-        buffer.as_bytes_mut().copy_from_slice(bytes);
-    } else {
-        return BigCode::parse(bytes).map(|_| unreachable!()).map_err(facts);
-    }
-    BigCode::parse(buffer.as_bytes())
-        .map(|value| match value {
+pub fn read_big(bytes: &[u8]) -> Result<u16, ErrorFacts> {
+    BigCode::access(bytes)
+        .map(|value| match value.get() {
             BigCode::Ready => 0x0102,
             BigCode::r#type => 0xabcd,
         })
         .map_err(facts)
 }
 
-pub fn parse_little_prefix(bytes: &[u8]) -> Result<(u32, &[u8]), ErrorFacts> {
-    LittleCode::parse_prefix(bytes)
-        .map(|(value, rest)| {
-            (
-                match value {
-                    LittleCode::First => 0x0102_0304,
-                    LittleCode::Last => 0xffff_fffe,
-                },
-                rest,
-            )
+pub fn read_little(bytes: &[u8]) -> Result<u32, ErrorFacts> {
+    LittleCode::access(bytes)
+        .map(|value| match value.get() {
+            LittleCode::First => 0x0102_0304,
+            LittleCode::Last => 0xffff_fffe,
+        })
+        .map_err(facts)
+}
+
+pub fn read_native(bytes: &[u8]) -> Result<u32, ErrorFacts> {
+    NativeCode::access(bytes)
+        .map(|value| match value.get() {
+            NativeCode::Marker => 0x1122_3344,
+            NativeCode::Maximum => 0xffff_ffff,
         })
         .map_err(facts)
 }
 
 pub fn big_unknown_facts(bytes: &[u8]) -> ErrorFacts {
-    let mut buffer = zs::make_buffer_for!(BigCode);
-    buffer.as_bytes_mut().copy_from_slice(bytes);
-    BigCode::parse(buffer.as_bytes())
+    BigCode::access(bytes)
         .err()
         .map(facts)
         .expect("unknown scalar value")
 }
 
 pub fn big_layout_facts(bytes: &[u8]) -> ErrorFacts {
-    BigCode::parse(bytes)
+    BigCode::access(bytes)
         .err()
         .map(facts)
         .expect("scalar layout error")
 }
-#[derive(ZeroSchema)]
-#[zero(crate = crate::zs)]
-struct PrivateChild {
-    valid: bool,
-    code: BigCode,
+
+mod private_parent {
+    use super::*;
+
+    #[zero(crate = crate::zs)]
+    pub struct PrivateChild {
+        valid: bool,
+        code: BigCode,
+    }
+
+    #[zero(crate = crate::zs)]
+    pub struct PublicPrivateParent {
+        prefix: u8,
+        child: PrivateChild,
+    }
+
+    pub(super) fn observation(bytes: &[u8]) -> super::Observation {
+        let mut storage = zs::schema_buffer!(PublicPrivateParent);
+        storage.as_bytes_mut().copy_from_slice(bytes);
+        let copied = PublicPrivateParent::access(storage.as_bytes())
+            .expect("reviewed producer fixture")
+            .copy_into();
+        super::Observation {
+            prefix: copied.prefix,
+            valid: copied.child.valid,
+        }
+    }
+
+    pub(super) fn error_facts(bytes: &[u8]) -> super::ErrorFacts {
+        PublicPrivateParent::access(bytes)
+            .err()
+            .map(super::facts)
+            .expect("invalid private child")
+    }
 }
 
-#[derive(ZeroSchema)]
-#[zero(crate = crate::zs)]
-pub struct PublicPrivateParent {
-    prefix: u8,
-    child: PrivateChild,
-}
-
-#[derive(ZeroSchema)]
 #[zero(crate = crate::zs)]
 pub struct PublicParent {
     prefix: u8,
     child: DirectChild,
 }
 
-// The dedicated Miri target never exercises this fixture. Miri cannot compile its
-// foreign lifetime-erased associated-wire layout; normal rustc still builds it.
 #[cfg(not(miri))]
-#[derive(ZeroSchema)]
 #[zero(crate = crate::zs, borrow = 'a)]
 pub struct BorrowingParent<'a> {
     child: BorrowedChild<'a>,
     marker: &'a [u8; 2],
 }
 
-#[derive(ZeroSchema)]
 #[zero(crate = crate::zs)]
 pub struct GenericParent<'a, const N: usize> {
     child: GenericBytes<'a, N>,
     trailing: u8,
 }
 
-#[derive(ZeroSchema)]
 #[zero(crate = crate::zs)]
 pub struct CompositionParent {
     direct: DirectChild,
     projected: TrailingProjection,
+    child_tag: ChildTag,
+    #[zero(tag_field = child_tag)]
     tagged: ChildMessage,
+}
+
+/// Downstream composition uses only the public logical child declarations;
+/// their generated support remains private to the child crate.
+#[zero(crate = crate::zs)]
+pub struct OptionalParent {
+    maybe_code: Option<OptionalCode>,
+    maybe_child: Option<OptionalChild>,
+    maybe_codes: Option<[OptionalCode; 2]>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -147,124 +159,184 @@ pub struct Observation {
     pub valid: bool,
 }
 
-#[cfg(not(miri))]
-pub fn roundtrip_private(prefix: u8, valid: bool) -> (Vec<u8>, Observation) {
-    let value = PublicParent {
-        prefix,
-        child: DirectChild {
-            valid,
-            value: 0x2468,
-        },
-    };
-    let buffer = value.encode().unwrap();
-    let bytes = buffer.as_bytes().to_vec();
-    let decoded = PublicParent::parse(buffer.as_bytes()).unwrap();
-    (
-        bytes,
-        Observation {
-            prefix: decoded.prefix,
-            valid: decoded.child.valid,
-        },
-    )
+#[derive(Debug, Eq, PartialEq)]
+pub struct OptionalObservation {
+    pub code: Option<OptionalCode>,
+    pub child: Option<(OptionalCode, u16)>,
+    pub codes: Option<[OptionalCode; 2]>,
 }
 
-#[cfg(not(miri))]
-pub fn roundtrip_truly_private(prefix: u8, valid: bool, code: BigCode) -> (Vec<u8>, Observation) {
-    let value = PublicPrivateParent {
-        prefix,
-        child: PrivateChild { valid, code },
-    };
-    let buffer = value.encode().unwrap();
-    let bytes = buffer.as_bytes().to_vec();
-    let decoded = PublicPrivateParent::parse(buffer.as_bytes()).unwrap();
-    (
-        bytes,
-        Observation {
-            prefix: decoded.prefix,
-            valid: decoded.child.valid,
-        },
-    )
+pub fn public_parent_fixture() -> &'static [u8] {
+    include_bytes!("../golden/public-parent.bin")
+}
+
+pub fn private_parent_fixture() -> &'static [u8] {
+    include_bytes!("../golden/private-parent.bin")
+}
+
+pub fn composition_parent_fixture() -> &'static [u8] {
+    include_bytes!("../golden/composition-parent.bin")
+}
+
+pub fn public_parent_from_fixture() -> Observation {
+    let mut storage = zs::schema_buffer!(PublicParent);
+    storage
+        .as_bytes_mut()
+        .copy_from_slice(public_parent_fixture());
+    let view = PublicParent::access(storage.as_bytes()).expect("reviewed producer fixture");
+    let copied = view.copy_into();
+    Observation {
+        prefix: copied.prefix,
+        valid: copied.child.valid,
+    }
+}
+
+pub fn private_parent_from_fixture() -> Observation {
+    private_parent::observation(private_parent_fixture())
 }
 
 pub fn truly_private_error_facts(bytes: &[u8]) -> ErrorFacts {
-    PublicPrivateParent::parse(bytes)
-        .err()
-        .map(facts)
-        .expect("invalid private child")
-}
-
-#[cfg(not(miri))]
-pub fn child_message_unknown_facts(bytes: &[u8]) -> ErrorFacts {
-    let mut buffer = zs::make_buffer_for!(ChildMessage);
-    buffer.as_bytes_mut().copy_from_slice(bytes);
-    ChildMessage::parse(buffer.as_bytes())
-        .err()
-        .map(facts)
-        .expect("unknown child tag")
-}
-
-pub fn child_message_layout() -> (usize, usize, usize, &'static str, &'static str) {
-    let layout = ChildMessage::LAYOUT;
-    let variants = layout.variants();
-    (
-        layout.size(),
-        layout.align(),
-        variants.len(),
-        variants[0].name(),
-        variants[1].name(),
-    )
+    private_parent::error_facts(bytes)
 }
 
 pub fn private_error_facts(bytes: &[u8]) -> ErrorFacts {
-    PublicParent::parse(bytes)
+    PublicParent::access(bytes)
         .err()
         .map(facts)
         .expect("invalid private child")
 }
 
-#[cfg(not(miri))]
-pub fn roundtrip_borrowed<'a>(text: &'a str, marker: &'a [u8; 2]) -> (Vec<u8>, usize) {
-    let value = BorrowingParent {
-        child: BorrowedChild { text },
-        marker,
-    };
-    let buffer = value.encode().unwrap();
-    let decoded = BorrowingParent::parse(buffer.as_bytes()).unwrap();
-    let base = buffer.as_bytes().as_ptr() as usize;
-    let text_offset = decoded.child.text.as_ptr() as usize - base;
-    (buffer.as_bytes().to_vec(), text_offset)
+pub fn child_message_unknown_facts(bytes: &[u8]) -> ErrorFacts {
+    CompositionParent::access(bytes)
+        .err()
+        .map(facts)
+        .expect("unknown external child tag")
+}
+
+pub fn composition_metadata() -> (usize, usize, usize, usize, &'static str) {
+    let layout = CompositionParent::LAYOUT;
+    let payload = &layout.fields()[3];
+    (
+        layout.size(),
+        layout.align(),
+        layout.fields()[2].offset(),
+        payload.offset(),
+        payload.name(),
+    )
 }
 
 pub fn generic_layout<const N: usize>() -> (usize, usize, usize) {
     (
-        GenericParent::<'static, N>::WIRE_SIZE,
+        GenericParent::<'static, N>::SCHEMA_SIZE,
         GenericParent::<'static, N>::LAYOUT.fields()[0].size(),
         GenericBytes::<'static, N>::LAYOUT.fields()[0].size(),
     )
 }
 
-#[cfg(not(miri))]
-pub fn composition_roundtrip(message: ChildMessage) -> (Vec<u8>, u8, u16, u8) {
-    let value = CompositionParent {
-        direct: DirectChild {
-            valid: true,
-            value: 0x1234,
-        },
-        projected: TrailingProjection {
-            child: DirectChild {
-                valid: false,
-                value: 0x5678,
-            },
-            sentinel: 0xa5,
-        },
-        tagged: message,
-    };
-    let buffer = value.encode().unwrap();
-    let decoded = CompositionParent::parse(buffer.as_bytes()).unwrap();
-    (
-        buffer.as_bytes().to_vec(),
-        u8::from(decoded.direct.valid),
-        decoded.projected.child.value,
-        decoded.projected.sentinel,
+fn optional_observation(logical: OptionalParent) -> OptionalObservation {
+    OptionalObservation {
+        code: logical.maybe_code,
+        child: logical.maybe_child.map(|child| (child.code, child.payload)),
+        codes: logical.maybe_codes,
+    }
+}
+
+/// Proves an all-zero downstream option span materializes without exposing
+/// child support or wire projections in this public API.
+pub fn optional_parent_none_from_zeroed() -> OptionalObservation {
+    let storage = zs::schema_buffer!(OptionalParent);
+    optional_observation(
+        OptionalParent::access(storage.as_bytes())
+            .expect("zero sentinel option fields are absent")
+            .copy_into(),
     )
+}
+
+/// Exercises downstream optional mutation, nested logical patches, and a
+/// patch clear through public logical child declarations only.
+pub fn optional_parent_mutation_and_patch() -> OptionalObservation {
+    let mut storage = zs::schema_buffer!(OptionalParent);
+    {
+        let mut parent = OptionalParent::access_mut(storage.as_bytes_mut())
+            .expect("zero sentinel option fields are absent");
+        parent
+            .maybe_code_mut()
+            .set(Some(OptionalCode::One))
+            .expect("initialize optional enum");
+        parent
+            .maybe_child_mut()
+            .set(Some(OptionalChild {
+                code: OptionalCode::Two,
+                payload: 0x1234,
+            }))
+            .expect("initialize optional child");
+        parent
+            .maybe_codes_mut()
+            .set(Some([OptionalCode::One, OptionalCode::Two]))
+            .expect("initialize optional enum array");
+
+        let patch = OptionalParentPatch {
+            maybe_code: Some(Some(OptionalCode::Two.into())),
+            maybe_child: Some(Some(OptionalChildPatch {
+                code: Some(OptionalCode::One.into()),
+                payload: Some(0x5678),
+            })),
+            maybe_codes: Some(Some([OptionalCode::Two, OptionalCode::One])),
+        };
+        parent
+            .copy_from(&patch)
+            .expect("complete patch updates and clears present optionals");
+    }
+    optional_observation(
+        OptionalParent::access(storage.as_bytes())
+            .expect("patched optional fields stay valid")
+            .copy_into(),
+    )
+}
+
+pub fn composition_from_fixture() -> (u8, u16, u8, u32) {
+    let mut storage = zs::schema_buffer!(CompositionParent);
+    storage
+        .as_bytes_mut()
+        .copy_from_slice(composition_parent_fixture());
+    let view = CompositionParent::access(storage.as_bytes()).expect("reviewed producer fixture");
+    let _ = view.copy_into();
+    let tagged = view.tagged();
+    let data = tagged.data().expect("Data is selected by the external tag");
+    (
+        u8::from(view.direct().valid()),
+        view.projected().child().value(),
+        view.projected().sentinel(),
+        data.number(),
+    )
+}
+
+#[cfg(test)]
+mod opaque_private_parent_regression {
+    use super::*;
+
+    #[repr(align(16))]
+    struct Aligned<const N: usize>([u8; N]);
+
+    #[test]
+    fn private_parent_materializes_without_naming_the_child_projection() {
+        assert_eq!(
+            private_parent_from_fixture(),
+            Observation {
+                prefix: 11,
+                valid: false,
+            }
+        );
+    }
+
+    #[test]
+    fn private_parent_error_preserves_the_private_child_boundary() {
+        let mut malformed = Aligned(*include_bytes!("../golden/private-parent.bin"));
+        malformed.0[2] = 2;
+        let error = truly_private_error_facts(&malformed.0);
+        assert_eq!(error.kind, ErrorKind::InvalidBool);
+        assert_eq!(error.segment, Some(ErrorPathSegment::Field("child")));
+        assert_eq!(error.child_schema, Some("PrivateChild"));
+        assert!(error.child_source_identical);
+    }
 }

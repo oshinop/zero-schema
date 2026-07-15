@@ -1,0 +1,5 @@
+error: array length must be a nonzero integer literal, direct const parameter, or simple const path
+ --> tests/ui/fail/02_array_expression.rs:5:19
+  |
+5 |     values: [u32; N + 1],
+  |                   ^

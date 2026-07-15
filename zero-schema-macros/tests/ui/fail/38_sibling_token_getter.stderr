@@ -1,0 +1,5 @@
+error[E0425]: cannot find function `__zero_schema_input_token` in module `__zero_schema_support_publicroot_68f3781aafb1d646`
+  --> tests/ui/fail/38_sibling_token_getter.rs:12:68
+   |
+12 |     let token = __zero_schema_support_publicroot_68f3781aafb1d646::__zero_schema_input_token();
+   |                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `__zero_schema_support_publicroot_68f3781aafb1d646`

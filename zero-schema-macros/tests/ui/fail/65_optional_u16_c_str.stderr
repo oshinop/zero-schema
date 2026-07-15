@@ -1,0 +1,5 @@
+error: Option<T> cannot use string or fixed-byte T because the all-zero wire can be valid
+ --> tests/ui/fail/65_optional_u16_c_str.rs:5:19
+  |
+5 |     value: Option<&'static widestring::U16CStr>,
+  |                   ^

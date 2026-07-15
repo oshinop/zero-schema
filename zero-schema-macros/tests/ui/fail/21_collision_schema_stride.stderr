@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `SCHEMA_STRIDE`
+ --> tests/ui/fail/21_collision_schema_stride.rs:5:5
+  |
+5 |     SCHEMA_STRIDE: u8,
+  |     ^^^^^^^^^^^^^

@@ -1,0 +1,10 @@
+error[E0119]: conflicting implementations of trait `RootInputAccess` for type `PublicRootWire`
+  --> tests/ui/fail/37_root_token_coherence.rs:4:1
+   |
+4  | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ conflicting implementation for `PublicRootWire`
+...
+11 | impl RootInputAccess for Wire {
+   | ----------------------------- first implementation here
+   |
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)

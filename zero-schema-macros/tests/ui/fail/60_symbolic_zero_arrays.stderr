@@ -1,0 +1,71 @@
+error[E0080]: evaluation of `Plain::<0>::__ZERO_SCHEMA_NONZERO_ARRAYS` failed
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:10:1
+   |
+10 | #[zero]
+   | ^^^^^^^ the evaluated program panicked at 'zero-length schema arrays are unsupported', $DIR/tests/ui/fail/60_symbolic_zero_arrays.rs:10:1
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `assert` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: erroneous constant encountered
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:10:1
+   |
+10 | #[zero]
+   | ^^^^^^^
+   |
+   = note: this note originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: the above error was encountered while instantiating `fn Plain::<0>::access`
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:25:13
+   |
+25 |     let _ = Plain::<0>::access(&plain);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0080]: evaluation of `__zero_schema_support_plain_1fae982278a651d3::PlainSupport::<0>::__ZERO_SCHEMA_NONZERO_ARRAYS` failed
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:10:1
+   |
+10 | #[zero]
+   | ^^^^^^^ the evaluated program panicked at 'zero-length schema arrays are unsupported', $DIR/tests/ui/fail/60_symbolic_zero_arrays.rs:10:1
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `assert` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: the above error was encountered while instantiating `fn <__zero_schema_support_plain_1fae982278a651d3::PlainSupport<0> as zero_schema::__private::SchemaSupport>::validate`
+ --> $WORKSPACE/src/__private.rs
+  |
+  |         Self::validate(input)?;
+  |         ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0080]: evaluation of `Optional::<0>::__ZERO_SCHEMA_NONZERO_ARRAYS` failed
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:16:1
+   |
+16 | #[zero]
+   | ^^^^^^^ the evaluated program panicked at 'zero-length schema arrays are unsupported', $DIR/tests/ui/fail/60_symbolic_zero_arrays.rs:16:1
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `assert` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: erroneous constant encountered
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:16:1
+   |
+16 | #[zero]
+   | ^^^^^^^
+   |
+   = note: this note originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: the above error was encountered while instantiating `fn Optional::<0>::access`
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:27:13
+   |
+27 |     let _ = Optional::<0>::access(&optional);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0080]: evaluation of `__zero_schema_support_optional_e4ddd684ee01ece3::OptionalSupport::<0>::__ZERO_SCHEMA_NONZERO_ARRAYS` failed
+  --> tests/ui/fail/60_symbolic_zero_arrays.rs:16:1
+   |
+16 | #[zero]
+   | ^^^^^^^ the evaluated program panicked at 'zero-length schema arrays are unsupported', $DIR/tests/ui/fail/60_symbolic_zero_arrays.rs:16:1
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `assert` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: the above error was encountered while instantiating `fn <__zero_schema_support_optional_e4ddd684ee01ece3::OptionalSupport<0> as zero_schema::__private::SchemaSupport>::validate`
+ --> $WORKSPACE/src/__private.rs
+  |
+  |         Self::validate(input)?;
+  |         ^^^^^^^^^^^^^^^^^^^^^

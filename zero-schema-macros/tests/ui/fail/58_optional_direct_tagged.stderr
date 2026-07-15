@@ -1,0 +1,141 @@
+error[E0277]: the trait bound `TaggedPayload: WireType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `WireType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `WireType`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: WireTypeSupport` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `WireTypeSupport` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `WireTypeSupport`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: SchemaPatchType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `SchemaPatchType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `SchemaPatchType`:
+             Child
+             Invalid
+             Tag
+note: required for `InvalidPatch` to implement `SchemaPatch<InvalidSupport>`
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^
+note: required by a bound in `SchemaPatchType::Patch`
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     type Patch<'source>: SchemaPatch<Self::Support>;
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SchemaPatchType::Patch`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: SchemaPatchType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `SchemaPatchType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `SchemaPatchType`:
+             Child
+             Invalid
+             Tag
+note: required by a bound in `InvalidPatch`
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ required by this bound in `InvalidPatch`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: WireType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `WireType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `WireType`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the derive macro `::zerocopy::FromBytes` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: WireType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `WireType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `WireType`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the derive macro `::zerocopy::KnownLayout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: WireTypeSupport` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `WireTypeSupport` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `WireTypeSupport`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the derive macro `Debug` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: SchemaPatchType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `SchemaPatchType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `SchemaPatchType`:
+             Child
+             Invalid
+             Tag
+   = help: see issue #48214
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `TaggedPayload: SchemaPatchType` is not satisfied
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^ the trait `SchemaPatchType` is not implemented for `TaggedPayload`
+   |
+   = help: the following other types implement trait `SchemaPatchType`:
+             Child
+             Invalid
+             Tag
+note: required for `InvalidPatch` to implement `SchemaPatch<InvalidSupport>`
+  --> tests/ui/fail/58_optional_direct_tagged.rs:21:1
+   |
+21 | #[zero]
+   | ^^^^^^^
+note: required by a bound in `SchemaSupport::preflight_patch`
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     fn preflight_patch<'wire, P>(
+   |        --------------- required by a bound in this associated function
+...
+   |         P: SchemaPatch<Self>,
+   |            ^^^^^^^^^^^^^^^^^ required by this bound in `SchemaSupport::preflight_patch`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)

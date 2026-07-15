@@ -1,120 +1,186 @@
-use core::ffi::CStr;
-use core::mem::{align_of, offset_of, size_of, size_of_val};
+use core::mem::{align_of, size_of};
 
-use widestring::{U16CStr, U16Str};
-use zero_schema::{ZeroSchema, ZeroSchemaType};
+use zero_schema::{ArrayElementKind, ErrorKind, FieldKind, SchemaError, TypeKind, zero};
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Details<'a> {
-    #[zero(capacity = 12, len_type = u8, tail = "zero")]
-    name: &'a str,
-    // C string capacities count bytes, including the terminating NUL.
-    #[zero(capacity = 8, tail = "zero")]
-    label: &'a CStr,
-    // Wide-string capacities and tail offsets count u16 code units, not bytes.
-    #[zero(capacity = 6, len_type = u8, endian = "native", tail = "zero")]
-    category: &'a U16Str,
-    #[zero(capacity = 6, endian = "native", tail = "zero")]
-    path: &'a U16CStr,
-    digest: &'a [u8; 4],
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Record<'a> {
-    // The integer's byte order is fixed independently of the host platform.
-    #[zero(endian = "big")]
-    id: u32,
+#[zero]
+#[derive(Debug, PartialEq)]
+struct Header {
+    version: u8,
     active: bool,
-    details: Details<'a>,
-}
-const SUFFIX_LEN: usize = 4;
-
-#[repr(C)]
-struct FramedRecord {
-    _align: [<Record<'static> as ZeroSchemaType>::Wire; 0],
-    bytes: [u8; Record::WIRE_SIZE + SUFFIX_LEN],
 }
 
-const _: () = assert!(offset_of!(FramedRecord, bytes) == 0);
+#[zero(align = 4)]
+#[derive(Debug, PartialEq)]
+struct Record<'a> {
+    sequence: u8,
+    header: Header,
+    samples: [u8; 3],
+    token: &'a [u8; 4],
+}
 
-fn points_into<T: ?Sized>(value: *const T, bytes: &[u8]) -> bool {
-    let address = value.cast::<u8>() as usize;
-    let start = bytes.as_ptr() as usize;
-    start <= address && address < start + bytes.len()
+// Reviewed producer output for `Record`: Rust only receives and observes it.
+const REVIEWED_PRODUCER_RECORD: [u8; 12] = [7, 2, 1, 3, 5, 8, 0x10, 0x20, 0x30, 0x40, 0xa1, 0xa2];
+
+const _: [(); 12] = [(); Record::SCHEMA_SIZE];
+const _: [(); 4] = [(); Record::SCHEMA_ALIGN];
+const _: [(); 12] = [(); Record::SCHEMA_STRIDE];
+
+#[repr(C, align(4))]
+struct ProducerRecord {
+    bytes: [u8; Record::SCHEMA_SIZE],
+}
+
+impl ProducerRecord {
+    const fn reviewed() -> Self {
+        Self {
+            bytes: REVIEWED_PRODUCER_RECORD,
+        }
+    }
 }
 
 fn main() {
-    let category_units = [b'r' as u16, b'u' as u16, b's' as u16, b't' as u16];
-    let category = U16Str::from_slice(&category_units);
-    let path_units = [b'/' as u16, b't' as u16, b'm' as u16, b'p' as u16, 0];
-    let path = U16CStr::from_slice(&path_units).expect("path has one trailing NUL");
-    let digest = [0x10, 0x20, 0x30, 0x40];
-    let original = Record {
-        id: 0x0102_0304,
-        active: true,
-        details: Details {
-            name: "config",
-            label: c"stable",
-            category,
-            path,
-            digest: &digest,
-        },
+    let mut producer = ProducerRecord::reviewed();
+    assert_eq!(size_of::<ProducerRecord>(), Record::SCHEMA_SIZE);
+    assert_eq!(align_of::<ProducerRecord>(), Record::SCHEMA_ALIGN);
+
+    let layout = Record::LAYOUT;
+    assert_eq!(
+        (
+            layout.name(),
+            layout.kind(),
+            layout.size(),
+            layout.align(),
+            layout.stride(),
+        ),
+        ("Record", TypeKind::Struct, 12, 4, 12)
+    );
+    let fields = layout.fields();
+    assert_eq!(fields.len(), 4);
+    for (index, (name, offset, size, align)) in [
+        ("sequence", 0, 1, 1),
+        ("header", 1, 2, 1),
+        ("samples", 3, 3, 1),
+        ("token", 6, 4, 1),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let field = fields[index];
+        assert_eq!(
+            (
+                field.declaration_index(),
+                field.name(),
+                field.offset(),
+                field.size(),
+                field.align(),
+            ),
+            (index, *name, *offset, *size, *align)
+        );
+        assert!(!field.is_optional());
+    }
+    let FieldKind::Schema { layout: header } = fields[1].kind() else {
+        panic!("header metadata must describe Header");
     };
-
-    // `encode` returns initialized, correctly aligned wire storage. Keep it alive
-    // for at least as long as any borrowed values returned by `parse`.
-    let buffer = original
-        .encode()
-        .expect("the value fits every declared capacity");
-
-    assert_eq!(
-        Record::WIRE_SIZE,
-        size_of::<<Record<'static> as ZeroSchemaType>::Wire>()
-    );
-    assert_eq!(
-        Record::WIRE_ALIGN,
-        align_of::<<Record<'static> as ZeroSchemaType>::Wire>()
-    );
-    assert_eq!(Record::WIRE_STRIDE, size_of_val(&buffer));
-    assert_eq!(Record::LAYOUT.size(), Record::WIRE_SIZE);
-    assert_eq!(Record::LAYOUT.align(), Record::WIRE_ALIGN);
-    assert_eq!(Record::LAYOUT.stride(), Record::WIRE_STRIDE);
-
-    let decoded = Record::parse(buffer.as_bytes()).expect("encoded bytes parse exactly");
-    assert_eq!(decoded, original);
-
-    // Every borrowed projection points into the encoded buffer: parsing did not copy it.
-    let encoded = buffer.as_bytes();
-    assert!(points_into(decoded.details.name.as_ptr(), encoded));
-    assert!(points_into(decoded.details.label.as_ptr(), encoded));
-    assert!(points_into(decoded.details.category.as_ptr(), encoded));
-    assert!(points_into(decoded.details.path.as_ptr(), encoded));
-    assert!(points_into(decoded.details.digest.as_ptr(), encoded));
-
-    let suffix = [0xde, 0xad, 0xbe, 0xef];
-    // `parse_prefix` still requires aligned input. The zero-length wire array
-    // aligns the larger frame without unsafe code or assumptions about `Vec`.
-    let mut framed = FramedRecord {
-        _align: [],
-        bytes: [0; Record::WIRE_SIZE + SUFFIX_LEN],
+    assert_eq!(header.name(), "Header");
+    let FieldKind::Array(samples) = fields[2].kind() else {
+        panic!("samples metadata must describe a fixed array");
     };
-    framed.bytes[..Record::WIRE_SIZE].copy_from_slice(encoded);
-    framed.bytes[Record::WIRE_SIZE..].copy_from_slice(&suffix);
-    let (from_prefix, remainder) =
-        Record::parse_prefix(&framed.bytes).expect("wire prefix is complete");
-    assert_eq!(from_prefix, original);
-    assert_eq!(remainder, suffix);
+    assert_eq!((samples.length(), samples.stride()), (3, 1));
+    assert!(matches!(
+        samples.element(),
+        ArrayElementKind::Primitive { .. }
+    ));
+    assert_eq!(fields[3].kind(), FieldKind::FixedBytes { length: 4 });
+    assert!(
+        layout
+            .padding()
+            .iter()
+            .any(|range| (range.start(), range.end()) == (10, 12))
+    );
+    assert_eq!(&producer.bytes[10..12], &[0xa1, 0xa2]);
+
+    let view = Record::access(&producer.bytes).expect("reviewed producer bytes are valid");
+    assert_eq!(view.sequence(), 7);
+    assert_eq!((view.header().version(), view.header().active()), (2, true));
+    let samples = view.samples();
+    assert_eq!(samples.get(1), Some(5));
+    assert_eq!(samples.get(3), None);
+    assert!(samples.iter().eq([3, 5, 8]));
+    assert_eq!(samples.copy_into(), [3, 5, 8]);
+    assert_eq!(view.token(), &[0x10, 0x20, 0x30, 0x40]);
+
+    // Materialization builds the logical record; ordinary wire padding has no field.
+    let logical: Record<'_> = view.copy_into();
     assert_eq!(
-        remainder.as_ptr(),
-        framed.bytes[Record::WIRE_SIZE..].as_ptr()
+        logical,
+        Record {
+            sequence: 7,
+            header: Header {
+                version: 2,
+                active: true,
+            },
+            samples: [3, 5, 8],
+            token: &[0x10, 0x20, 0x30, 0x40],
+        }
     );
 
+    {
+        let mut record = Record::access_mut(&mut producer.bytes)
+            .expect("the same producer bytes remain valid for constrained mutation");
+        {
+            let mut samples = record.samples_mut();
+            assert_eq!(samples.get(0), Some(3));
+            assert_eq!(samples.get(3), None);
+            {
+                let mut sample = samples.get_mut(1).expect("declared sample index");
+                assert_eq!(sample.get(), 5);
+                sample.set(13).expect("valid primitive replacement");
+            }
+            samples.set(0, 11).expect("valid primitive replacement");
+            samples
+                .copy_from(&[19, 21, 23])
+                .expect("exact logical array copy is preflighted before writes");
+            assert_eq!(samples.copy_into(), [19, 21, 23]);
+        }
+        record
+            .copy_from(&RecordPatch {
+                sequence: Some(9),
+                header: Some(HeaderPatch {
+                    version: None,
+                    active: Some(false),
+                }),
+                ..Default::default()
+            })
+            .expect("the partial patch is fully preflighted before it writes");
+    }
+
+    let before_failed_array_copy = producer.bytes;
+    {
+        let mut record = Record::access_mut(&mut producer.bytes)
+            .expect("the successful updates remain valid for another short reborrow");
+        let mut samples = record.samples_mut();
+        let error = samples
+            .copy_from(&[31, 37])
+            .expect_err("a fixed array copy requires exactly three elements");
+        assert_eq!(error.kind(), ErrorKind::ArrayLengthMismatch);
+    }
+    assert_eq!(producer.bytes, before_failed_array_copy);
+    assert_eq!(&producer.bytes[10..12], &[0xa1, 0xa2]);
+
+    let refreshed = Record::access(&producer.bytes).expect("successful mutation stays valid");
+    assert_eq!(
+        (
+            refreshed.sequence(),
+            refreshed.header().version(),
+            refreshed.header().active(),
+            refreshed.samples().copy_into(),
+            refreshed.token(),
+        ),
+        (9, 2, false, [19, 21, 23], &[0x10, 0x20, 0x30, 0x40])
+    );
     println!(
-        "record id={:08x} active={} name={} category_units={} suffix_bytes={}",
-        decoded.id,
-        decoded.active,
-        decoded.details.name,
-        decoded.details.category.len(),
-        remainder.len()
+        "record sequence={} samples={:?}",
+        refreshed.sequence(),
+        refreshed.samples().copy_into()
     );
 }

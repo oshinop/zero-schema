@@ -3,14 +3,13 @@ use std::time::{Duration, Instant};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zero_schema_conformance::{
-    cpp_inspect_fixture, cpp_inspect_fixture_into, cpp_write_fixture_into, rust_fixture,
+    cpp_inspect_fixture, cpp_inspect_fixture_into, cpp_write_fixture, cpp_write_fixture_into,
     rust_observe,
 };
 use zero_schema_schema_corpus::conformance::ConformanceExternalMessage;
 
 const CASE_ID: u32 = 1010;
 const BATCH: usize = 1024;
-// prefix u8 + external u8 tag + selected ConformanceData u32 + suffix u16.
 const ACTIVE_BYTES: usize = 1 + 1 + 4 + 2;
 
 fn empty_batch() {
@@ -24,45 +23,43 @@ fn subtract_baseline(batch: Duration, empty: Duration) -> Duration {
 }
 
 fn cpp_codec(c: &mut Criterion) {
-    let wire_size = ConformanceExternalMessage::WIRE_SIZE;
-    let rust_bytes = rust_fixture(CASE_ID).expect("Rust fixture must encode");
-    assert_eq!(rust_bytes.len(), wire_size);
-
-    let mut encoded = vec![0_u8; wire_size];
-    let written = cpp_write_fixture_into(CASE_ID, &mut encoded).expect("C++ fixture must encode");
-    assert_eq!(written, wire_size);
-    assert_eq!(encoded, rust_bytes, "C++ bytes must match Rust bytes");
-
-    let expected_observations =
-        rust_observe(CASE_ID, &rust_bytes).expect("Rust fixture must decode");
-    let report = cpp_inspect_fixture(CASE_ID, &rust_bytes).expect("C++ fixture must decode");
-    assert_eq!(report.pairs(), expected_observations.as_slice());
-    let report_slots = 3 + 2 * report.pairs().len();
-    let mut slots = vec![0_u64; report_slots];
-
-    // Warm both C++ paths once before Criterion starts measuring.
+    let wire_size = ConformanceExternalMessage::SCHEMA_SIZE;
+    let producer_bytes = cpp_write_fixture(CASE_ID, wire_size).expect("C++ producer");
+    let expected_observations = rust_observe(CASE_ID, &producer_bytes).expect("Rust access");
     assert_eq!(
-        cpp_write_fixture_into(CASE_ID, black_box(&mut encoded)).expect("warm encode"),
+        cpp_inspect_fixture(CASE_ID, &producer_bytes)
+            .expect("C++ observation")
+            .pairs(),
+        expected_observations.as_slice()
+    );
+
+    let mut produced = vec![0_u8; wire_size];
+    let mut slots = vec![0_u64; 3 + 2 * expected_observations.len()];
+    assert_eq!(
+        cpp_write_fixture_into(CASE_ID, &mut produced).expect("warm C++ producer"),
         wire_size
     );
     assert_eq!(
-        cpp_inspect_fixture_into(CASE_ID, black_box(&encoded), black_box(&mut slots))
-            .expect("warm inspect"),
-        report_slots
+        cpp_inspect_fixture_into(CASE_ID, &producer_bytes, &mut slots).expect("warm C++ observer"),
+        slots.len()
+    );
+    assert_eq!(
+        rust_observe(CASE_ID, &producer_bytes).expect("warm Rust access"),
+        expected_observations
     );
 
     let parameter = format!("case-{CASE_ID}/wire-{wire_size}/active-{ACTIVE_BYTES}");
-    let mut group = c.benchmark_group("cpp_codec");
+    let mut group = c.benchmark_group("cpp_conformance");
     group.throughput(Throughput::Bytes(ACTIVE_BYTES as u64));
 
-    group.bench_with_input(BenchmarkId::new("write", &parameter), &(), |b, &()| {
+    group.bench_with_input(BenchmarkId::new("producer", &parameter), &(), |b, &()| {
         b.iter_custom(|iterations| {
             let start = Instant::now();
             for _ in 0..iterations {
                 for _ in 0..BATCH {
-                    let count = cpp_write_fixture_into(CASE_ID, black_box(&mut encoded))
-                        .expect("C++ encode failed");
-                    black_box(count);
+                    black_box(
+                        cpp_write_fixture_into(CASE_ID, &mut produced).expect("C++ producer"),
+                    );
                 }
             }
             let batch = start.elapsed();
@@ -74,36 +71,52 @@ fn cpp_codec(c: &mut Criterion) {
         });
     });
 
-    group.bench_with_input(BenchmarkId::new("inspect", &parameter), &(), |b, &()| {
-        b.iter_custom(|iterations| {
-            let start = Instant::now();
-            for _ in 0..iterations {
-                for _ in 0..BATCH {
-                    let count = cpp_inspect_fixture_into(
-                        CASE_ID,
-                        black_box(&encoded),
-                        black_box(&mut slots),
-                    )
-                    .expect("C++ inspect failed");
-                    black_box(count);
+    group.bench_with_input(
+        BenchmarkId::new("cpp-observe", &parameter),
+        &(),
+        |b, &()| {
+            b.iter_custom(|iterations| {
+                let start = Instant::now();
+                for _ in 0..iterations {
+                    for _ in 0..BATCH {
+                        black_box(
+                            cpp_inspect_fixture_into(CASE_ID, &producer_bytes, &mut slots)
+                                .expect("C++ observer"),
+                        );
+                    }
                 }
-            }
-            let batch = start.elapsed();
-            let empty_start = Instant::now();
-            for _ in 0..iterations {
-                empty_batch();
-            }
-            subtract_baseline(batch, empty_start.elapsed())
-        });
-    });
+                let batch = start.elapsed();
+                let empty_start = Instant::now();
+                for _ in 0..iterations {
+                    empty_batch();
+                }
+                subtract_baseline(batch, empty_start.elapsed())
+            });
+        },
+    );
+
+    group.bench_with_input(
+        BenchmarkId::new("rust-access", &parameter),
+        &(),
+        |b, &()| {
+            b.iter_custom(|iterations| {
+                let start = Instant::now();
+                for _ in 0..iterations {
+                    for _ in 0..BATCH {
+                        black_box(rust_observe(CASE_ID, &producer_bytes).expect("Rust access"));
+                    }
+                }
+                let batch = start.elapsed();
+                let empty_start = Instant::now();
+                for _ in 0..iterations {
+                    empty_batch();
+                }
+                subtract_baseline(batch, empty_start.elapsed())
+            });
+        },
+    );
 
     group.finish();
-
-    let mut baseline_group = c.benchmark_group("cpp_codec_empty_baseline");
-    baseline_group.bench_with_input(BenchmarkId::new("empty", &parameter), &(), |b, &()| {
-        b.iter(empty_batch);
-    });
-    baseline_group.finish();
 }
 
 criterion_group!(benches, cpp_codec);

@@ -1,0 +1,145 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:29:67
+   |
+29 |     let shared_root = SharedInput::<RootWire>::from_exact(&bytes, ()).unwrap();
+   |                       -----------------------------------         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                       |
+   |                       arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+29 |     let shared_root = SharedInput::<RootWire>::from_exact(&bytes, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                   +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:41:81
+   |
+41 |     let mut exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, ()).unwrap();
+   |                              --------------------------------------             ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                              |
+   |                              arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+41 |     let mut exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                                 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:45:53
+   |
+45 |     <Adapter as OptionFieldAdapter>::clear(storage, ());
+   |     --------------------------------------          ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     fn clear(mut input: ExclusiveInput<'_, Self::StorageWire>, token: Self::Token) {
+   |        ^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+45 |     <Adapter as OptionFieldAdapter>::clear(storage, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                     +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:48:81
+   |
+48 |     let mut exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, ()).unwrap();
+   |                              --------------------------------------             ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                              |
+   |                              arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+48 |     let mut exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                                 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:57:9
+   |
+52 |     <Adapter as OptionFieldAdapter>::commit_init(
+   |     -------------------------------------------- arguments to this function are incorrect
+...
+57 |         (),
+   |         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     fn commit_init<'wire, 'source>(
+   |        ^^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+57 |         __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () },
+   |         +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:60:67
+   |
+60 |     let shared_root = SharedInput::<RootWire>::from_exact(&bytes, ()).unwrap();
+   |                       -----------------------------------         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                       |
+   |                       arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+60 |     let shared_root = SharedInput::<RootWire>::from_exact(&bytes, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                   +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:67:77
+   |
+67 |     let exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, ()).unwrap();
+   |                          --------------------------------------             ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                          |
+   |                          arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+67 |     let exclusive_root = ExclusiveInput::<RootWire>::from_exact(&mut bytes, __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                             +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/50_private_option_initialization.rs:71:9
+   |
+68 |     <OptionalRootPatch as SchemaPatch<RootSupport>>::commit_init(
+   |     ------------------------------------------------------------ arguments to this function are incorrect
+...
+71 |         (),
+   |         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |
+note: method defined here
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     fn commit_init<'wire>(&self, input: ExclusiveInput<'wire, S::Wire>, token: S::Token) {
+   |        ^^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+71 |         __zero_schema_support_optionalroot_5161d5ec2fc1a37b::__ZeroSchemaInputAccessToken { _private: () },
+   |         +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +

@@ -1,0 +1,5 @@
+error: array elements must be primitives, bool, scalar enums, or finite nested schemas
+ --> tests/ui/fail/14_unsupported_array_element.rs:5:14
+  |
+5 |     values: [&'a str; 2],
+  |              ^

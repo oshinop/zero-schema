@@ -1,0 +1,17 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/34_root_shared_input_token.rs:12:53
+   |
+12 |     let _ = SharedInput::<Wire>::from_exact(&bytes, ());
+   |             -------------------------------         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |             |
+   |             arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+12 |     let _ = SharedInput::<Wire>::from_exact(&bytes, __zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                     +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +

@@ -1,0 +1,27 @@
+[package]
+name = "zero-schema-macros"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Attribute macros for zero-schema"
+documentation = "https://docs.rs/zero-schema-macros"
+include = ["src/**", "Cargo.toml", "LICENSE"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "=2.0.118", default-features = false, features = ["derive", "full", "parsing", "printing", "proc-macro", "clone-impls", "visit", "visit-mut"] }
+quote = "=1.0.46"
+proc-macro2 = "=1.0.106"
+proc-macro-crate = "=3.5.0"
+
+[dev-dependencies]
+zs = { package = "zero-schema", path = "..", default-features = false }
+widestring = { version = "=1.2.1", default-features = false }
+trybuild = "=1.0.117"
+zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+
+[package.metadata.docs.rs]
+all-features = true

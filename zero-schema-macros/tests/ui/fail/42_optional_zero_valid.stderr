@@ -1,0 +1,31 @@
+error[E0271]: type mismatch resolving `<ZeroValid as WireTypeSupport>::ZeroState == ZeroInvalid`
+  --> tests/ui/fail/42_optional_zero_valid.rs:24:12
+   |
+24 |     let _: core::marker::PhantomData<Invalid<ZeroValid>> = core::marker::PhantomData;
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ZeroInvalid`, found `ZeroValid`
+   |
+   = note: required for `ZeroValid` to implement `OptionalWireType`
+note: required by a bound in `Invalid`
+  --> tests/ui/fail/42_optional_zero_valid.rs:14:8
+   |
+12 | struct Invalid<T>
+   |        ------- required by a bound in this struct
+13 | where
+14 |     T: zs::__private::OptionalWireType
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Invalid`
+
+error[E0271]: type mismatch resolving `<ZeroValid as WireTypeSupport>::ZeroState == ZeroInvalid`
+  --> tests/ui/fail/42_optional_zero_valid.rs:24:60
+   |
+24 |     let _: core::marker::PhantomData<Invalid<ZeroValid>> = core::marker::PhantomData;
+   |                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ZeroInvalid`, found `ZeroValid`
+   |
+   = note: required for `ZeroValid` to implement `OptionalWireType`
+note: required by a bound in `Invalid`
+  --> tests/ui/fail/42_optional_zero_valid.rs:14:8
+   |
+12 | struct Invalid<T>
+   |        ------- required by a bound in this struct
+13 | where
+14 |     T: zs::__private::OptionalWireType
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Invalid`

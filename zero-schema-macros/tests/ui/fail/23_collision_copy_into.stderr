@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `copy_into`
+ --> tests/ui/fail/23_collision_copy_into.rs:5:5
+  |
+5 |     copy_into: u8,
+  |     ^^^^^^^^^

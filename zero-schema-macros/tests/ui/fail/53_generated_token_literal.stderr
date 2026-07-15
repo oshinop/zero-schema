@@ -1,0 +1,5 @@
+error[E0451]: field `_private` of struct `__ZeroSchemaInputAccessToken` is private
+  --> tests/ui/fail/53_generated_token_literal.rs:17:25
+   |
+17 |     let token = Token { _private: () };
+   |                         ^^^^^^^^^^^^ private field

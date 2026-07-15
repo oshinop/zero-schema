@@ -1,0 +1,245 @@
+error[E0412]: cannot find type `Wire` in this scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:20:12
+   |
+20 |     let _: Wire;
+   |            ^^^^ not found in this scope
+
+error[E0599]: no associated item named `Wire` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:21:21
+   |
+10 | struct Opaque {
+   | ------------- associated item `Wire` not found for this struct
+...
+21 |     let _ = Opaque::Wire;
+   |                     ^^^^ associated item not found in `Opaque`
+
+error[E0599]: no function or associated item named `parse` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:22:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `parse` not found for this struct
+...
+22 |     let _ = Opaque::parse(&[1_u8]);
+   |                     ^^^^^ function or associated item not found in `Opaque`
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following traits define an item `parse`, perhaps you need to implement one of them:
+           candidate #1: `syn::parse::Parse`
+           candidate #2: `syn::parse::Parser`
+           candidate #3: `syn::parse_quote::ParseQuote`
+           candidate #4: `winnow::Parser`
+
+error[E0599]: no function or associated item named `parse_prefix` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:23:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `parse_prefix` not found for this struct
+...
+23 |     let _ = Opaque::parse_prefix(&[1_u8]);
+   |                     ^^^^^^^^^^^^ function or associated item not found in `Opaque`
+
+error[E0599]: no function or associated item named `encode` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:24:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `encode` not found for this struct
+...
+24 |     let _ = Opaque::encode(&Opaque { value: 1 });
+   |                     ^^^^^^ function or associated item not found in `Opaque`
+
+error[E0599]: no function or associated item named `encode_into` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:25:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `encode_into` not found for this struct
+...
+25 |     let _ = Opaque::encode_into(&Opaque { value: 1 }, &mut [1_u8]);
+   |                     ^^^^^^^^^^^ function or associated item not found in `Opaque`
+
+error[E0599]: no function or associated item named `build` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:26:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `build` not found for this struct
+...
+26 |     let _ = Opaque::build();
+   |                     ^^^^^ function or associated item not found in `Opaque`
+
+error[E0599]: no function or associated item named `init` found for struct `Opaque` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:27:21
+   |
+10 | struct Opaque {
+   | ------------- function or associated item `init` not found for this struct
+...
+27 |     let _ = Opaque::init();
+   |                     ^^^^ function or associated item not found in `Opaque`
+
+error[E0433]: failed to resolve: use of undeclared type `GenericSchemaBuffer`
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:28:13
+   |
+28 |     let _ = GenericSchemaBuffer::new();
+   |             ^^^^^^^^^^^^^^^^^^^ use of undeclared type `GenericSchemaBuffer`
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:31:72
+   |
+31 |     let attacker_input = SharedInput::<OpaqueWire>::from_exact(&bytes, ()).unwrap();
+   |                          -------------------------------------         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                          |
+   |                          arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_opaque_78aecef4b3d04e5c::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+31 |     let attacker_input = SharedInput::<OpaqueWire>::from_exact(&bytes, __zero_schema_support_opaque_78aecef4b3d04e5c::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                        +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0599]: no method named `wire` found for struct `SharedInput` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:32:28
+   |
+32 |     let _ = attacker_input.wire::<Attacker>(());
+   |                            ^^^^ private field, not a method
+
+error[E0277]: the trait bound `__zero_schema_support_opaque_78aecef4b3d04e5c::OpaqueWire: std::marker::Copy` is not satisfied
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:33:40
+   |
+33 |     let _ = attacker_input.read_copy::<OpaqueWire>(0);
+   |                            ---------   ^^^^^^^^^^ the trait `std::marker::Copy` is not implemented for `__zero_schema_support_opaque_78aecef4b3d04e5c::OpaqueWire`
+   |                            |
+   |                            required by a bound introduced by this call
+   |
+note: required by a bound in `SharedInput::<'bytes, W>::read_copy`
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn read_copy<F>(&self, offset: usize) -> Result<F, LayoutError>
+   |            --------- required by a bound in this associated function
+   |     where
+   |         F: FromBytes + KnownLayout + Immutable + Copy,
+   |                                                  ^^^^ required by this bound in `SharedInput::<'bytes, W>::read_copy`
+help: consider annotating `__zero_schema_support_opaque_78aecef4b3d04e5c::OpaqueWire` with `#[derive(Copy)]`
+   |
+9  + #[derive(Copy)]
+10 | #[zero(crate = zs)]
+   |
+
+error[E0599]: no function or associated item named `from_view` found for struct `OpaqueRef` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:36:24
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- function or associated item `from_view` not found for this struct
+...
+36 |     let _ = OpaqueRef::from_view(&view);
+   |                        ^^^^^^^^^ function or associated item not found in `OpaqueRef<'_>`
+
+error[E0599]: no method named `copy_view` found for struct `OpaqueRef` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:37:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `copy_view` not found for this struct
+...
+37 |     let _ = view.copy_view();
+   |                  ^^^^^^^^^ method not found in `OpaqueRef<'_>`
+
+error[E0599]: no method named `raw` found for struct `OpaqueRef` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:38:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `raw` not found for this struct
+...
+38 |     let _ = view.raw();
+   |                  ^^^ method not found in `OpaqueRef<'_>`
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `raw`, perhaps you need to implement it:
+           candidate #1: `ScalarEnumSupport`
+
+error[E0599]: no method named `wire` found for struct `OpaqueRef` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:39:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `wire` not found for this struct
+...
+39 |     let _ = view.wire();
+   |                  ^^^^ method not found in `OpaqueRef<'_>`
+
+error[E0616]: field `input` of struct `OpaqueRef` is private
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:40:18
+   |
+40 |     let _ = view.input;
+   |                  ^^^^^ private field
+
+error[E0599]: the method `to_owned` exists for struct `OpaqueMut<'_>`, but its trait bounds were not satisfied
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:43:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `to_owned` not found for this struct because it doesn't satisfy `OpaqueMut<'_>: Clone` or `OpaqueMut<'_>: ToOwned`
+...
+43 |     let _ = view.to_owned();
+   |                  ^^^^^^^^ method cannot be called on `OpaqueMut<'_>` due to unsatisfied trait bounds
+   |
+note: there's an earlier shadowed binding `view` of type `OpaqueRef<'_>` that has method `to_owned` available
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:34:9
+   |
+34 |     let view = Opaque::access(&bytes).unwrap();
+   |         ^^^^ `view` of type `OpaqueRef<'_>` that has method `to_owned` defined earlier here
+...
+42 |     let mut view = Opaque::access_mut(&mut mutable_bytes).unwrap();
+   |         -------- earlier `view` shadowed here with type `OpaqueMut<'_>`
+   = note: the following trait bounds were not satisfied:
+           `OpaqueMut<'_>: Clone`
+           which is required by `OpaqueMut<'_>: ToOwned`
+help: consider annotating `OpaqueMut<'_>` with `#[derive(Clone)]`
+   |
+9  + #[derive(Clone)]
+10 | #[zero(crate = zs)]
+   |
+
+error[E0599]: no function or associated item named `from_view` found for struct `OpaqueMut` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:44:24
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- function or associated item `from_view` not found for this struct
+...
+44 |     let _ = OpaqueMut::from_view(&mut view);
+   |                        ^^^^^^^^^ function or associated item not found in `OpaqueMut<'_>`
+
+error[E0599]: no method named `copy_view` found for struct `OpaqueMut` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:45:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `copy_view` not found for this struct
+...
+45 |     let _ = view.copy_view();
+   |                  ^^^^^^^^^ method not found in `OpaqueMut<'_>`
+
+error[E0599]: no method named `raw` found for struct `OpaqueMut` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:46:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `raw` not found for this struct
+...
+46 |     let _ = view.raw();
+   |                  ^^^ method not found in `OpaqueMut<'_>`
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `raw`, perhaps you need to implement it:
+           candidate #1: `ScalarEnumSupport`
+
+error[E0599]: no method named `wire` found for struct `OpaqueMut` in the current scope
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:47:18
+   |
+9  | #[zero(crate = zs)]
+   | ------------------- method `wire` not found for this struct
+...
+47 |     let _ = view.wire();
+   |                  ^^^^ method not found in `OpaqueMut<'_>`
+
+error[E0616]: field `input` of struct `OpaqueMut` is private
+  --> tests/ui/fail/28_hidden_wire_and_legacy_api.rs:48:18
+   |
+48 |     let _ = view.input;
+   |                  ^^^^^ private field

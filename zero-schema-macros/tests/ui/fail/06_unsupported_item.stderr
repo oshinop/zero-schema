@@ -1,0 +1,5 @@
+error: #[zero] supports only module-scope named structs and enums
+ --> tests/ui/fail/06_unsupported_item.rs:4:1
+  |
+4 | fn not_a_schema() {}
+  | ^^

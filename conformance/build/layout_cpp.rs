@@ -21,7 +21,9 @@ pub struct PathMeta {
     pub capacity: Option<u32>,
     pub len_endian: Option<Endian>,
     pub unit_width: u32,
-    pub tail_zero: bool,
+    pub array_length: Option<u32>,
+    pub array_stride_expr: Option<String>,
+    pub optional: bool,
 }
 #[derive(Clone, Debug)]
 pub enum PathKind {
@@ -29,6 +31,7 @@ pub enum PathKind {
     Bool,
     String(StringKind),
     FixedBytes,
+    Array,
     Nested,
     Tag,
     Payload,
@@ -118,6 +121,13 @@ fn field<'a>(m: &'a Model, s: &str, n: &str) -> &'a Field {
         .unwrap_or_else(|| panic!("missing field {s}.{n}"))
 }
 
+fn optional_inner(ty: &Type) -> (&Type, bool) {
+    match ty {
+        Type::Option(inner) => (inner, true),
+        _ => (ty, false),
+    }
+}
+
 struct Gen<'a> {
     m: &'a Model,
     names: BTreeMap<String, String>,
@@ -154,8 +164,32 @@ impl<'a> Gen<'a> {
         .unwrap();
         n
     }
+    fn array_element_type(&mut self, element: &Type, endian: Endian) -> (String, u32) {
+        match element {
+            Type::Primitive(value) => {
+                let (base, width) = primitive(*value);
+                let ty = if width == 1 || endian == Endian::Native {
+                    base.into()
+                } else {
+                    self.raw(width, endian)
+                };
+                (ty, width)
+            }
+            Type::Bool => ("std::uint8_t".into(), 1),
+            Type::Schema(name) => match &self.m.schema(name).kind {
+                SchemaKind::ScalarEnum { repr, endian, .. } => {
+                    (self.raw(iw(*repr), *endian), iw(*repr))
+                }
+                SchemaKind::Struct { .. } => (self.typename(name), 1),
+                SchemaKind::TaggedEnum { .. } => panic!("tagged payload array is unsupported"),
+            },
+            Type::Option(inner) => self.array_element_type(inner, endian),
+            _ => panic!("unsupported fixed-array element"),
+        }
+    }
     fn lower_field(&mut self, schema: &str, index: usize, f: &Field) -> (String, String, PathMeta) {
         let member = format!("m{index}");
+        let (field_ty, optional) = optional_inner(&f.ty);
         let (mut ty, kind, unit, data, lenoff, lenw): (
             String,
             PathKind,
@@ -163,7 +197,7 @@ impl<'a> Gen<'a> {
             Option<String>,
             Option<String>,
             Option<IntWidth>,
-        ) = match &f.ty {
+        ) = match field_ty {
             Type::Primitive(p) => {
                 let (base, w) = primitive(*p);
                 let t = if w == 1 || f.endian == Endian::Native {
@@ -179,6 +213,12 @@ impl<'a> Gen<'a> {
                 writeln!(self.decl, "struct {h} {{ std::uint8_t m0[{n}]; }};").unwrap();
                 (h, PathKind::FixedBytes, 1, None, None, None)
             }
+            Type::Array { element, length } => {
+                let (element_type, width) = self.array_element_type(element, f.endian);
+                let h = self.fresh();
+                writeln!(self.decl, "struct {h} {{ {element_type} m0[{length}]; }};").unwrap();
+                (h, PathKind::Array, width, None, None, None)
+            }
             Type::Schema(n) => {
                 let child = self.m.schema(n);
                 match &child.kind {
@@ -190,20 +230,8 @@ impl<'a> Gen<'a> {
                         None,
                         None,
                     ),
-                    SchemaKind::TaggedEnum { variants, .. } if f.tag_field.is_some() => {
-                        let nonzero: Vec<_> =
-                            variants.iter().filter_map(|v| v.payload.as_ref()).collect();
-                        if nonzero.is_empty() {
-                            ("".into(), PathKind::Payload, 1, None, None, None)
-                        } else {
-                            let u = self.fresh();
-                            writeln!(self.decl, "union {u} {{").unwrap();
-                            for (j, p) in nonzero.iter().enumerate() {
-                                writeln!(self.decl, "  {} m{j};", self.typename(p)).unwrap();
-                            }
-                            writeln!(self.decl, "}};").unwrap();
-                            (u, PathKind::Payload, 1, None, None, None)
-                        }
+                    SchemaKind::TaggedEnum { .. } if f.tag_field.is_some() => {
+                        (self.typename(n), PathKind::Payload, 1, None, None, None)
                     }
                     _ => (self.typename(n), PathKind::Nested, 1, None, None, None),
                 }
@@ -251,26 +279,25 @@ impl<'a> Gen<'a> {
                     )
                 }
             }
+            Type::Option(_) => unreachable!("optional type is lowered to its inner storage"),
+        };
+        let array_metadata = match field_ty {
+            Type::Array { length, .. } => Some((*length, format!("sizeof({ty}::m0[0])"))),
+            _ => None,
         };
         if let Some(a) = f.align {
-            if !ty.is_empty() {
-                let w = self.fresh();
-                let al = max_expr(&a.to_string(), &format!("alignof({ty})"));
-                writeln!(self.decl, "struct alignas({al}) {w} {{ {ty} m0; }};").unwrap();
-                writeln!(self.asserts,"static_assert(alignof({w})=={al} && sizeof({w})%alignof({w})==0 && offsetof({w},m0)==0);").unwrap();
-                ty = w;
-            }
+            let w = self.fresh();
+            let al = max_expr(&a.to_string(), &format!("alignof({ty})"));
+            writeln!(self.decl, "struct alignas({al}) {w} {{ {ty} m0; }};").unwrap();
+            writeln!(self.asserts,"static_assert(alignof({w})=={al} && sizeof({w})%alignof({w})==0 && offsetof({w},m0)==0);").unwrap();
+            ty = w;
         }
         let base = format!("offsetof({}, {member})", self.typename(schema));
         let meta = PathMeta {
             schema: schema.into(),
             path: vec![f.name.clone()],
             offset_expr: base.clone(),
-            width_expr: if ty.is_empty() {
-                "0".into()
-            } else {
-                format!("sizeof({ty})")
-            },
+            width_expr: format!("sizeof({ty})"),
             endian: f.endian,
             kind,
             data_offset_expr: data.map(|x| format!("({base})+({x})")),
@@ -279,7 +306,9 @@ impl<'a> Gen<'a> {
             len_endian: f.len.map(|x| x.1),
             capacity: f.capacity,
             unit_width: unit,
-            tail_zero: f.tail_zero,
+            array_length: array_metadata.as_ref().map(|(length, _)| *length),
+            array_stride_expr: array_metadata.map(|(_, stride)| stride),
+            optional,
         };
         (member, ty, meta)
     }
@@ -300,55 +329,45 @@ impl<'a> Gen<'a> {
             }
             SchemaKind::Struct { fields } => {
                 let mut lowered = Vec::new();
-                for (i, f) in fields.iter().enumerate() {
-                    lowered.push(self.lower_field(n, i, f));
+                for (index, field) in fields.iter().enumerate() {
+                    lowered.push(self.lower_field(n, index, field));
                 }
-                let trailing = lowered
-                    .last()
-                    .and_then(|x| {
-                        if x.1.is_empty() {
-                            fields.last().and_then(|f| f.align)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(1);
-                let root_align = s.align.unwrap_or(1).max(trailing);
-                let al = if root_align > 1 {
-                    format!(" alignas({root_align})")
+                let alignment = s.align.unwrap_or(1);
+                let alignment_attribute = if alignment > 1 {
+                    format!(" alignas({alignment})")
                 } else {
                     String::new()
                 };
-                writeln!(self.decl, "struct{al} {cpp} {{").unwrap();
-                let mut pending = 1;
-                for (i, (member, ty, _)) in lowered.iter().enumerate() {
-                    if ty.is_empty() {
-                        pending = pending.max(fields[i].align.unwrap_or(1));
-                    } else {
-                        if pending > 1 {
-                            writeln!(self.decl, "  alignas({pending}) {ty} {member};").unwrap();
-                        } else {
-                            writeln!(self.decl, "  {ty} {member};").unwrap();
-                        }
-                        pending = 1;
-                    }
+                writeln!(self.decl, "struct{alignment_attribute} {cpp} {{").unwrap();
+                for (member, ty, _) in &lowered {
+                    writeln!(self.decl, "  {ty} {member};").unwrap();
                 }
                 writeln!(self.decl, "}};").unwrap();
                 let mut paths = Vec::new();
-                for (i, (member, ty, mut meta)) in lowered.into_iter().enumerate() {
-                    if !ty.is_empty() {
+                for (member, ty, meta) in lowered {
+                    writeln!(
+                        self.asserts,
+                        "static_assert(offsetof({cpp},{member}) < sizeof({cpp}));"
+                    )
+                    .unwrap();
+                    if meta.optional {
                         writeln!(
                             self.asserts,
-                            "static_assert(offsetof({cpp},{member}) < sizeof({cpp}));"
+                            "static_assert(std::is_same<decltype({cpp}::{member}),{ty}>::value);"
                         )
                         .unwrap();
-                    } else {
-                        let next=(i+1..fields.len()).find(|j|!matches!(&fields[*j].ty,Type::Schema(q) if matches!(&self.m.schema(q).kind,SchemaKind::TaggedEnum{variants,..} if fields[*j].tag_field.is_some()&&variants.iter().all(|v|v.payload.is_none()))));
-                        meta.offset_expr = next
-                            .map(|j| format!("offsetof({cpp},m{j})"))
-                            .unwrap_or_else(|| format!("sizeof({cpp})"));
+                        writeln!(
+                            self.asserts,
+                            "static_assert(sizeof(decltype({cpp}::{member}))==sizeof({ty}));"
+                        )
+                        .unwrap();
+                        writeln!(
+                            self.asserts,
+                            "static_assert(alignof(decltype({cpp}::{member}))==alignof({ty}));"
+                        )
+                        .unwrap();
                     }
-                    paths.push(meta)
+                    paths.push(meta);
                 }
                 writeln!(self.asserts,"static_assert(std::is_standard_layout<{cpp}>::value && std::is_trivially_copyable<{cpp}>::value);").unwrap();
                 self.metas.push(TypeMeta {
@@ -359,57 +378,39 @@ impl<'a> Gen<'a> {
                     paths,
                 });
             }
-            SchemaKind::TaggedEnum { tag, variants } => {
-                let tagty = self.typename(&tag);
-                let u = self.fresh();
-                let payloads: Vec<_> = variants.iter().filter_map(|v| v.payload.as_ref()).collect();
-                if !payloads.is_empty() {
-                    writeln!(self.decl, "union {u} {{").unwrap();
-                    for (j, p) in payloads.iter().enumerate() {
-                        writeln!(self.decl, "  {} m{j};", self.typename(p)).unwrap();
-                    }
-                    writeln!(self.decl, "}};").unwrap();
-                }
-                let al = s
+            SchemaKind::TaggedEnum { variants, .. } => {
+                let alignment_attribute = s
                     .align
-                    .map(|x| format!(" alignas({x})"))
+                    .map(|alignment| format!(" alignas({alignment})"))
                     .unwrap_or_default();
-                writeln!(
-                    self.decl,
-                    "struct{al} {cpp} {{ {tagty} m0; {} }};",
-                    if payloads.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{u} m1;")
+                writeln!(self.decl, "union{alignment_attribute} {cpp} {{").unwrap();
+                for (index, variant) in variants.iter().enumerate() {
+                    match &variant.payload {
+                        Some(payload) => {
+                            writeln!(self.decl, "  {} m{index};", self.typename(payload)).unwrap();
+                        }
+                        None => {
+                            let unit = self.fresh();
+                            writeln!(
+                                self.decl,
+                                "  struct {unit} {{ std::uint8_t value; }} m{index};"
+                            )
+                            .unwrap();
+                        }
                     }
-                )
-                .unwrap();
-                writeln!(
-                    self.asserts,
-                    "static_assert(offsetof({cpp},m0)==0 && std::is_standard_layout<{cpp}>::value);"
-                )
-                .unwrap();
-                let mut paths = vec![PathMeta {
+                }
+                writeln!(self.decl, "}};").unwrap();
+                writeln!(self.asserts,"static_assert(sizeof({cpp})>0 && std::is_standard_layout<{cpp}>::value && std::is_trivially_copyable<{cpp}>::value);").unwrap();
+                self.metas.push(TypeMeta {
                     schema: n.into(),
-                    path: vec![],
-                    offset_expr: format!("offsetof({cpp},m0)"),
-                    width_expr: format!("sizeof({tagty})"),
-                    endian: Endian::Native,
-                    kind: PathKind::Tag,
-                    data_offset_expr: None,
-                    len_offset_expr: None,
-                    len_width: None,
-                    capacity: None,
-                    unit_width: 1,
-                    tail_zero: false,
-                    len_endian: None,
-                }];
-                if !payloads.is_empty() {
-                    paths.push(PathMeta {
+                    cpp: cpp.clone(),
+                    size_expr: format!("sizeof({cpp})"),
+                    align_expr: format!("alignof({cpp})"),
+                    paths: vec![PathMeta {
                         schema: n.into(),
                         path: vec!["$payload".into()],
-                        offset_expr: format!("offsetof({cpp},m1)"),
-                        width_expr: format!("sizeof({u})"),
+                        offset_expr: "0".into(),
+                        width_expr: format!("sizeof({cpp})"),
                         endian: Endian::Native,
                         kind: PathKind::Payload,
                         data_offset_expr: None,
@@ -418,15 +419,10 @@ impl<'a> Gen<'a> {
                         len_endian: None,
                         capacity: None,
                         unit_width: 1,
-                        tail_zero: s.tail_zero,
-                    });
-                }
-                self.metas.push(TypeMeta {
-                    schema: n.into(),
-                    cpp: cpp.clone(),
-                    size_expr: format!("sizeof({cpp})"),
-                    align_expr: format!("alignof({cpp})"),
-                    paths,
+                        array_length: None,
+                        array_stride_expr: None,
+                        optional: false,
+                    }],
                 });
             }
         }
@@ -451,113 +447,6 @@ pub fn emit(model: &Model) -> LayoutOutput {
     for s in &model.schemas {
         g.schema(&s.name);
     }
-    // The ABI-only graph deliberately omits zero-size members and carries their alignment to the next real member.
-    for (i, a) in model.abi_structs.iter().enumerate() {
-        let cpp = format!("a{i}");
-        if a.fields.is_empty() {
-            continue;
-        }
-        let natural = a
-            .fields
-            .iter()
-            .filter_map(|f| {
-                model
-                    .abi_structs
-                    .iter()
-                    .find(|x| x.name == f.ty && x.fields.is_empty())
-                    .and_then(|z| z.align)
-            })
-            .max()
-            .unwrap_or(1);
-        let al = a.align.unwrap_or(1).max(natural);
-        writeln!(g.decl, "struct alignas({al}) {cpp} {{").unwrap();
-        let mut pending = 1u32;
-        for (j, f) in a.fields.iter().enumerate() {
-            if let Some(z) = model
-                .abi_structs
-                .iter()
-                .find(|x| x.name == f.ty && x.fields.is_empty())
-            {
-                pending = pending.max(z.align.unwrap_or(1));
-                continue;
-            }
-            let ty = match f.ty.as_str() {
-                "u8" => "std::uint8_t",
-                "u32" => "std::uint32_t",
-                _ => panic!("unsupported ABI field type"),
-            };
-            if pending > 1 {
-                writeln!(g.decl, "  alignas({pending}) {ty} m{j};").unwrap()
-            } else {
-                writeln!(g.decl, "  {ty} m{j};").unwrap()
-            };
-            pending = 1;
-        }
-        writeln!(g.decl, "}};").unwrap();
-        writeln!(
-            g.asserts,
-            "static_assert(std::is_standard_layout<{cpp}>::value && alignof({cpp})=={al});"
-        )
-        .unwrap();
-        let mut paths = Vec::new();
-        for (j, f) in a.fields.iter().enumerate() {
-            let z = model
-                .abi_structs
-                .iter()
-                .find(|x| x.name == f.ty && x.fields.is_empty());
-            let (off, wid, unit) = if let Some(z) = z {
-                let next = (j + 1..a.fields.len()).find(|k| {
-                    !model
-                        .abi_structs
-                        .iter()
-                        .any(|x| x.name == a.fields[*k].ty && x.fields.is_empty())
-                });
-                (
-                    next.map(|k| format!("offsetof({cpp},m{k})"))
-                        .unwrap_or_else(|| format!("sizeof({cpp})")),
-                    "0".into(),
-                    z.align.unwrap_or(1),
-                )
-            } else {
-                (
-                    format!("offsetof({cpp},m{j})"),
-                    match f.ty.as_str() {
-                        "u8" => "1",
-                        "u32" => "4",
-                        _ => unreachable!(),
-                    }
-                    .into(),
-                    1,
-                )
-            };
-            paths.push(PathMeta {
-                schema: a.name.clone(),
-                path: vec![f.name.clone()],
-                offset_expr: off,
-                width_expr: wid,
-                endian: Endian::Native,
-                kind: if z.is_some() {
-                    PathKind::Nested
-                } else {
-                    PathKind::Scalar
-                },
-                data_offset_expr: None,
-                len_offset_expr: None,
-                len_width: None,
-                len_endian: None,
-                capacity: None,
-                unit_width: unit,
-                tail_zero: false,
-            });
-        }
-        g.metas.push(TypeMeta {
-            schema: a.name.clone(),
-            cpp: cpp.clone(),
-            size_expr: format!("sizeof({cpp})"),
-            align_expr: format!("alignof({cpp})"),
-            paths,
-        });
-    }
     let snapshot = g.metas.clone();
     for tm in &mut g.metas {
         let Some(schema) = model.schemas.iter().find(|s| s.name == tm.schema) else {
@@ -568,7 +457,10 @@ pub fn emit(model: &Model) -> LayoutOutput {
         };
         let direct = tm.paths.clone();
         for f in fields {
-            let Type::Schema(child) = &f.ty else { continue };
+            let (field_ty, _) = optional_inner(&f.ty);
+            let Type::Schema(child) = field_ty else {
+                continue;
+            };
             if f.tag_field.is_some() {
                 continue;
             }
@@ -594,6 +486,7 @@ pub fn emit(model: &Model) -> LayoutOutput {
                     .len_offset_expr
                     .as_ref()
                     .map(|x| format!("({})+({x})", base.offset_expr));
+                p.optional = base.optional || p.optional;
                 tm.paths.push(p);
             }
         }
@@ -601,9 +494,8 @@ pub fn emit(model: &Model) -> LayoutOutput {
     let metadata = LayoutMetadata { types: g.metas };
     let mut arms = String::new();
     for c in &model.cases {
-        let root = match &c.root {
-            Root::Schema(n) | Root::Abi(n) => metadata.ty(n),
-        };
+        let Root::Schema(name) = &c.root;
+        let root = metadata.ty(name);
         writeln!(arms, "case {}: {{", c.id).unwrap();
         for e in &c.layout {
             let v = metric_expr(model, &metadata, root, &e.metric);
@@ -637,29 +529,53 @@ fn metric_expr(m: &Model, md: &LayoutMetadata, root: &TypeMeta, x: &Metric) -> S
             .width_expr
             .clone(),
         Metric::FieldAlign(n) => {
-            if model_has_schema(m, &root.schema) {
-                let f = field(m, &root.schema, n);
-                if let Some(a) = f.align {
-                    a.to_string()
-                } else {
+            let field = field(m, &root.schema, n);
+            field
+                .align
+                .map(|alignment| alignment.to_string())
+                .unwrap_or_else(|| {
                     format!(
                         "alignof(decltype({}::m{}))",
                         root.cpp,
                         field_index(m, &root.schema, n)
                     )
-                }
-            } else {
-                let p = md.path(&root.schema, std::slice::from_ref(n));
-                if p.width_expr == "0" {
-                    p.unit_width.to_string()
-                } else {
-                    format!(
-                        "alignof(decltype({}::m{}))",
-                        root.cpp,
-                        field_index_abi(m, &root.schema, n)
-                    )
-                }
+                })
+        }
+        Metric::ArrayLength(n) => {
+            let Type::Array { length, .. } = &field(m, &root.schema, n).ty else {
+                panic!("array length metric requires an array field")
+            };
+            length.to_string()
+        }
+        Metric::ArrayStride(n) => md
+            .path(&root.schema, std::slice::from_ref(n))
+            .array_stride_expr
+            .clone()
+            .unwrap_or_else(|| panic!("array stride metric requires an array field")),
+        Metric::OptionalSpan(n) => md
+            .path(&root.schema, std::slice::from_ref(n))
+            .width_expr
+            .clone(),
+        Metric::OptionalIsOptional(n) => {
+            u64::from(md.path(&root.schema, std::slice::from_ref(n)).optional).to_string()
+        }
+        Metric::OptionalArrayLength(n) => {
+            let p = md.path(&root.schema, std::slice::from_ref(n));
+            if !p.optional {
+                panic!("optional array length metric requires an optional field")
             }
+            p.array_length
+                .expect("optional array length metric requires an array field")
+                .to_string()
+        }
+        Metric::OptionalArrayStride(n) => {
+            let p = md.path(&root.schema, std::slice::from_ref(n));
+            if !p.optional {
+                panic!("optional array stride metric requires an optional field")
+            }
+            p.array_stride_expr
+                .clone()
+                .expect("optional array stride metric requires an array field")
         }
         Metric::EnumSize(n) => {
             let e = enum_field(m, &root.schema, n);
@@ -726,61 +642,47 @@ fn metric_expr(m: &Model, md: &LayoutMetadata, root: &TypeMeta, x: &Metric) -> S
             .unwrap_or(0)
             .to_string(),
         Metric::StringLengthOffset(_) => "0".into(),
-        Metric::StringTail(n) => u64::from(field(m, &root.schema, n).tail_zero).to_string(),
         Metric::TagOffset => {
-            let (ts, tag_field) = tagged_context(m, &root.schema);
-            if let Some(n) = tag_field {
-                md.path(&root.schema, &[n]).offset_expr.clone()
-            } else {
-                md.ty(&ts)
-                    .paths
-                    .iter()
-                    .find(|p| matches!(p.kind, PathKind::Tag))
-                    .unwrap()
-                    .offset_expr
-                    .clone()
-            }
+            let (_, tag_field) = tagged_context(m, &root.schema);
+            md.path(&root.schema, &[tag_field]).offset_expr.clone()
         }
         Metric::PayloadOffset => root
             .paths
             .iter()
-            .find(|p| matches!(p.kind, PathKind::Payload))
-            .map(|p| p.offset_expr.clone())
-            .unwrap_or_else(|| "0".into()),
+            .find(|path| matches!(path.kind, PathKind::Payload))
+            .unwrap()
+            .offset_expr
+            .clone(),
         Metric::PayloadSize => root
             .paths
             .iter()
-            .find(|p| matches!(p.kind, PathKind::Payload))
-            .map(|p| p.width_expr.clone())
-            .unwrap_or_else(|| "0".into()),
+            .find(|path| matches!(path.kind, PathKind::Payload))
+            .unwrap()
+            .width_expr
+            .clone(),
         Metric::PayloadAlign => payload_align_expr(m, root),
         Metric::TagSize => {
-            let (ts, tf) = tagged_context(m, &root.schema);
-            if let Some(n) = tf {
-                md.path(&root.schema, &[n]).width_expr.clone()
-            } else {
-                md.ty(&ts)
-                    .paths
-                    .iter()
-                    .find(|p| matches!(p.kind, PathKind::Tag))
-                    .unwrap()
-                    .width_expr
-                    .clone()
-            }
+            let (_, tag_field) = tagged_context(m, &root.schema);
+            md.path(&root.schema, &[tag_field]).width_expr.clone()
         }
         Metric::TagAlign => {
-            let (_, tf) = tagged_context(m, &root.schema);
-            if let Some(n) = tf {
-                format!(
-                    "alignof(decltype({}::m{}))",
-                    root.cpp,
-                    field_index(m, &root.schema, &n)
-                )
-            } else {
-                format!("alignof(decltype({}::m0))", root.cpp)
-            }
+            let (_, tag_field) = tagged_context(m, &root.schema);
+            format!(
+                "alignof(decltype({}::m{}))",
+                root.cpp,
+                field_index(m, &root.schema, &tag_field)
+            )
         }
-        Metric::TagEndian => "0".into(),
+        Metric::TagEndian => {
+            let (tagged, _) = tagged_context(m, &root.schema);
+            let SchemaKind::TaggedEnum { tag, .. } = &m.schema(&tagged).kind else {
+                panic!("tagged payload metadata required")
+            };
+            let SchemaKind::ScalarEnum { endian, .. } = &m.schema(tag).kind else {
+                panic!("scalar tag metadata required")
+            };
+            en(*endian).to_string()
+        }
         Metric::VariantRaw(v) => {
             let (ts, _) = tagged_context(m, &root.schema);
             let SchemaKind::TaggedEnum { tag, .. } = &m.schema(&ts).kind else {
@@ -806,68 +708,47 @@ fn metric_expr(m: &Model, md: &LayoutMetadata, root: &TypeMeta, x: &Metric) -> S
         }
     }
 }
-fn model_has_schema(m: &Model, s: &str) -> bool {
-    m.schemas.iter().any(|x| x.name == s)
-}
-fn field_index_abi(m: &Model, s: &str, n: &str) -> usize {
-    m.abi(s).fields.iter().position(|x| x.name == n).unwrap()
-}
 fn field_index(m: &Model, s: &str, n: &str) -> usize {
     let SchemaKind::Struct { fields } = &m.schema(s).kind else {
         panic!()
     };
-    fields.iter().position(|x| x.name == n).unwrap()
+    fields.iter().position(|field| field.name == n).unwrap()
 }
 fn enum_field<'a>(m: &'a Model, s: &str, n: &str) -> &'a str {
-    let Type::Schema(e) = &field(m, s, n).ty else {
+    let Type::Schema(enum_name) = &field(m, s, n).ty else {
         panic!("enum metric requires schema field")
     };
-    e
+    enum_name
 }
-fn tagged_context(m: &Model, s: &str) -> (String, Option<String>) {
-    match &m.schema(s).kind {
-        SchemaKind::TaggedEnum { .. } => (s.to_owned(), None),
-        SchemaKind::Struct { fields } => {
-            let p = fields
-                .iter()
-                .find(|f| f.tag_field.is_some())
-                .unwrap_or_else(|| panic!("tag metric on untagged struct"));
-            let Type::Schema(t) = &p.ty else { panic!() };
-            (t.clone(), p.tag_field.clone())
-        }
-        _ => panic!("tag metric on unsupported root"),
-    }
+fn tagged_context(m: &Model, s: &str) -> (String, String) {
+    let SchemaKind::Struct { fields } = &m.schema(s).kind else {
+        panic!("tag metric requires an external-union record")
+    };
+    let payload = fields
+        .iter()
+        .find(|field| field.tag_field.is_some())
+        .unwrap_or_else(|| panic!("tag metric on untagged record"));
+    let Type::Schema(tagged) = &payload.ty else {
+        panic!("tagged payload schema required")
+    };
+    (tagged.clone(), payload.tag_field.clone().unwrap())
 }
 fn payload_align_expr(m: &Model, root: &TypeMeta) -> String {
-    let p = root
+    let payload = root
         .paths
         .iter()
-        .find(|p| matches!(p.kind, PathKind::Payload))
+        .find(|path| matches!(path.kind, PathKind::Payload))
         .unwrap();
-    match &m.schema(&root.schema).kind {
-        SchemaKind::TaggedEnum { .. } => {
-            if p.width_expr == "0" {
-                "1".into()
-            } else {
-                format!("alignof(decltype({}::m1))", root.cpp)
-            }
-        }
-        SchemaKind::Struct { .. } => field(m, &root.schema, &p.path[0])
-            .align
-            .map(|x| x.to_string())
-            .unwrap_or_else(|| {
-                if p.width_expr == "0" {
-                    "1".into()
-                } else {
-                    format!(
-                        "alignof(decltype({}::m{}))",
-                        root.cpp,
-                        field_index(m, &root.schema, &p.path[0])
-                    )
-                }
-            }),
-        _ => panic!(),
-    }
+    field(m, &root.schema, &payload.path[0])
+        .align
+        .map(|alignment| alignment.to_string())
+        .unwrap_or_else(|| {
+            format!(
+                "alignof(decltype({}::m{}))",
+                root.cpp,
+                field_index(m, &root.schema, &payload.path[0])
+            )
+        })
 }
 fn variant_payload(m: &Model, md: &LayoutMetadata, s: &str, v: &str, align: bool) -> String {
     let SchemaKind::TaggedEnum { variants, .. } = &m.schema(s).kind else {
@@ -880,7 +761,7 @@ fn variant_payload(m: &Model, md: &LayoutMetadata, s: &str, v: &str, align: bool
         .payload
         .as_ref()
     {
-        None => if align { "1" } else { "0" }.into(),
+        None => "1".into(),
         Some(p) => {
             if align {
                 md.ty(p).align_expr.clone()

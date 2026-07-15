@@ -1,0 +1,5 @@
+error[E0432]: unresolved import `zero_schema_macros::ZeroSchema`
+ --> tests/ui/fail/00_removed_derive.rs:1:5
+  |
+1 | use zero_schema_macros::ZeroSchema;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `ZeroSchema` in the root

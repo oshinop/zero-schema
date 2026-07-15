@@ -1,5 +1,0 @@
-error: tagged enums require at least one variant
- --> tests/ui/fail/07_zero_variant_tagged.rs:1:66
-  |
-1 | use zero_schema_derive::ZeroSchema; #[derive(ZeroSchema)] #[zero(tag=Tag)] enum Empty {} fn main() {}
-  |                                                                  ^^^

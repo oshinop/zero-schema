@@ -21,15 +21,6 @@ pub use ffi::{
 pub use report::{FfiError, HarnessError, Report, Status};
 
 #[doc(hidden)]
-pub fn rust_fixture(case_id: u32) -> Result<Vec<u8>, HarnessError> {
-    let case = inventory::CASES
-        .iter()
-        .find(|case| case.case_id == case_id)
-        .ok_or(HarnessError::InvalidData("unknown benchmark case"))?;
-    (case.rust_bytes)()
-}
-
-#[doc(hidden)]
 pub fn rust_observe(case_id: u32, bytes: &[u8]) -> Result<Vec<(u64, u64)>, HarnessError> {
     let case = inventory::CASES
         .iter()

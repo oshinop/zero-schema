@@ -33,21 +33,22 @@ jobs:
           cargo +1.85.0 check --locked --workspace --all-targets
           cargo +1.85.0 check --locked -p zero-schema --no-default-features
           cargo +1.85.0 check --locked -p zero-schema --no-default-features --features alloc
-          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features derive
-          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features 'alloc,derive'
+          cargo +1.85.0 check --locked -p zero-schema --no-default-features --features 'alloc'
           cargo +1.85.0 check --locked -p zero-schema --no-default-features --features std
-          ci/check-derive-dev-features.sh 1.85.0
-          cargo +1.85.0 test --locked --workspace --all-features --exclude zero-schema-derive --lib --tests
-          cargo +1.85.0 test --locked -p zero-schema-derive --lib
-          cargo +1.85.0 test --locked -p zero-schema-derive --test ui
+          ci/check-macros-dev-features.sh 1.85.0
+          cargo +1.85.0 test --locked --workspace --all-features --exclude zero-schema-macros --lib --tests
+          cargo +1.85.0 test --locked -p zero-schema-macros --lib
+          cargo +1.85.0 test --locked -p zero-schema-macros --test ui
+          cargo +1.85.0 test --locked -p zero-schema-macros --test mutation_api
           cargo +1.85.0 test --locked --doc --workspace
       - name: Moving stable checks
         if: matrix.toolchain == 'stable'
         run: |
           cargo +stable clippy --locked --workspace --all-targets --all-features -- -D warnings
           cargo +stable check --locked --workspace --benches --all-features
-          cargo +stable test --locked --workspace --all-features --exclude zero-schema-derive --lib --tests
-          cargo +stable test --locked -p zero-schema-derive --lib
+          cargo +stable test --locked --workspace --all-features --exclude zero-schema-macros --lib --tests
+          cargo +stable test --locked -p zero-schema-macros --lib
+          cargo +stable test --locked -p zero-schema-macros --test mutation_api
           cargo +stable test --locked --doc --workspace
           RUSTDOCFLAGS='-D warnings' cargo +stable doc --locked --workspace --all-features --no-deps
       - name: Pinned-toolchain checks
@@ -59,8 +60,8 @@ jobs:
           cargo +1.97.0 clippy --locked --workspace --all-targets --all-features -- -D warnings
           cargo +1.97.0 clippy --locked --manifest-path fuzz/Cargo.toml --all-targets --all-features -- -D warnings
           cargo +1.97.0 check --locked --workspace --benches --all-features
-          cargo +1.97.0 test --locked -p zero-schema --test error_path_alloc --no-default-features --features 'alloc,derive'
-          cargo +1.97.0 test --locked -p zero-schema --test no_alloc -- --ignored --test-threads=1
+          cargo +1.97.0 test --locked -p zero-schema --test error_paths --no-default-features --features 'alloc'
+          cargo +1.97.0 test --locked -p zero-schema --test no_alloc -- --test-threads=1
           cargo +1.97.0 test --locked -p zero-schema --test properties
           cargo +1.97.0 test --locked --doc --workspace
           RUSTDOCFLAGS='-D warnings' cargo +1.97.0 doc --locked --workspace --all-features --no-deps
@@ -99,6 +100,7 @@ jobs:
       - run: rustup toolchain install 1.85.0 --profile minimal && rustup target add --toolchain 1.85.0 thumbv7em-none-eabihf wasm32v1-none
       - run: cargo +1.85.0 check --locked -p zero-schema-no-std-smoke --lib --target thumbv7em-none-eabihf
       - run: cargo +1.85.0 build --locked -p zero-schema-no-std-smoke --bin linked-wasm --target wasm32v1-none --release
+      - run: cargo +1.85.0 build --locked -p zero-schema --example no_std_wasm --target wasm32v1-none --release --no-default-features
 
   native-cpp:
     name: Native C++ (${{ matrix.os }})
@@ -189,12 +191,12 @@ jobs:
       - name: Build package archives
         run: |
           mkdir -p target/package
-          cargo +1.97.0 package --registry crates-io --locked --list -p zero-schema-derive > target/package/zero-schema-derive.files
-          diff -u ci/package-contents/zero-schema-derive.txt target/package/zero-schema-derive.files
+          cargo +1.97.0 package --registry crates-io --locked --list -p zero-schema-macros > target/package/zero-schema-macros.files
+          diff -u ci/package-contents/zero-schema-macros.txt target/package/zero-schema-macros.files
           cargo +1.97.0 package --registry crates-io --locked --list -p zero-schema > target/package/zero-schema.files
           diff -u ci/package-contents/zero-schema.txt target/package/zero-schema.files
-          cargo +1.97.0 package --registry crates-io --locked -p zero-schema-derive -p zero-schema
-          ci/verify-package-pair.sh target/package/zero-schema-derive-0.1.0.crate target/package/zero-schema-0.1.0.crate
+          cargo +1.97.0 package --registry crates-io --locked -p zero-schema-macros -p zero-schema
+          ci/verify-package-pair.sh target/package/zero-schema-macros-0.1.0.crate target/package/zero-schema-0.1.0.crate
 
   gate:
     if: always()

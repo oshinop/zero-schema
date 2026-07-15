@@ -1,0 +1,154 @@
+error[E0599]: the function or associated item `from_exact` exists for struct `SharedInput<'_, TaggedDataWire>`, but its trait bounds were not satisfied
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:45:38
+   |
+19 | #[zero(crate = zs)]
+   | ------------------- doesn't satisfy `TaggedDataWire: RootInputAccess`
+...
+45 |     let input = SharedInput::<Wire>::from_exact(&storage.0, ()).unwrap();
+   |                                      ^^^^^^^^^^ function or associated item cannot be called on `SharedInput<'_, TaggedDataWire>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `TaggedDataWire: RootInputAccess`
+note: the trait `RootInputAccess` must be implemented
+  --> $WORKSPACE/src/__private.rs
+   |
+   | pub trait RootInputAccess {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `prove` found for struct `TaggedRefSelection` in the current scope
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:46:44
+   |
+46 |     let _ = TaggedRefSelection::<Support>::prove(Tag::Data, input).unwrap();
+   |                                            ^^^^^ function or associated item not found in `TaggedRefSelection<'_, TaggedDataSupport>`
+   |
+note: if you're trying to build a new `TaggedRefSelection<'_, TaggedDataSupport>` consider using one of the following associated functions:
+      TaggedRefSelection::<'wire, Payload>::prove_at
+      TaggedRefSelection::<'wire, Payload>::prove_selected
+  --> $WORKSPACE/src/tagged.rs
+   |
+   | /     pub fn prove_at<Root>(
+   | |         root: SharedInput<'wire, Root::Wire>,
+   | |         tag: Payload::Tag,
+   | |         payload_offset: usize,
+...  |
+   | |     where
+   | |         Root: SchemaSupport,
+   | |____________________________^
+...
+   | /     pub fn prove_selected(
+   | |         tag: Payload::Tag,
+   | |         payload: SharedInput<'wire, Payload::Wire>,
+   | |         _: Payload::Token,
+   | |     ) -> Result<Self, <Payload::Owner as OwnerAdapter>::AccessError> {
+   | |____________________________________________________________________^
+help: there is an associated function `prove_at` with a similar name
+  --> $WORKSPACE/src/tagged.rs
+   |
+   | /     pub fn prove_at<Root>(
+   | |         root: SharedInput<'wire, Root::Wire>,
+   | |         tag: Payload::Tag,
+   | |         payload_offset: usize,
+...  |
+   | |     where
+   | |         Root: SchemaSupport,
+   | |____________________________^
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:47:77
+   |
+47 |     let _ = TaggedRefSelection::<Support>::prove_selected(Tag::Data, input, ());
+   |             ---------------------------------------------                   ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |             |
+   |             arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/tagged.rs
+   |
+   |     pub fn prove_selected(
+   |            ^^^^^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_taggeddata_fe2c8f07df0fa609::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+47 |     let _ = TaggedRefSelection::<Support>::prove_selected(Tag::Data, input, __zero_schema_support_taggeddata_fe2c8f07df0fa609::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                                             +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:49:69
+   |
+49 |     let root = SharedInput::<RootWire>::from_exact(&root_storage.0, ()).unwrap();
+   |                -----------------------------------                  ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                |
+   |                arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_root_252b6e2da0a7ae47::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+49 |     let root = SharedInput::<RootWire>::from_exact(&root_storage.0, __zero_schema_support_root_252b6e2da0a7ae47::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                     +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:50:88
+   |
+50 |     let _ = TaggedRefSelection::<Support>::prove_at::<RootSupport>(root, Tag::Data, 4, ());
+   |             ------------------------------------------------------                     ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |             |
+   |             arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/tagged.rs
+   |
+   |     pub fn prove_at<Root>(
+   |            ^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_root_252b6e2da0a7ae47::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+50 |     let _ = TaggedRefSelection::<Support>::prove_at::<RootSupport>(root, Tag::Data, 4, __zero_schema_support_root_252b6e2da0a7ae47::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                                                        +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0599]: the function or associated item `from_exact` exists for struct `ExclusiveInput<'_, TaggedDataWire>`, but its trait bounds were not satisfied
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:53:41
+   |
+19 | #[zero(crate = zs)]
+   | ------------------- doesn't satisfy `TaggedDataWire: RootInputAccess`
+...
+53 |     let input = ExclusiveInput::<Wire>::from_exact(&mut storage.0, ()).unwrap();
+   |                                         ^^^^^^^^^^ function or associated item cannot be called on `ExclusiveInput<'_, TaggedDataWire>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `TaggedDataWire: RootInputAccess`
+note: the trait `RootInputAccess` must be implemented
+  --> $WORKSPACE/src/__private.rs
+   |
+   | pub trait RootInputAccess {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `prove` found for struct `TaggedMutSelection` in the current scope
+  --> tests/ui/fail/33_hidden_tag_selection_bypass.rs:54:52
+   |
+54 |     let selection = TaggedMutSelection::<Support>::prove(Tag::Data, input).unwrap();
+   |                                                    ^^^^^ function or associated item not found in `TaggedMutSelection<'_, TaggedDataSupport>`
+   |
+note: if you're trying to build a new `TaggedMutSelection<'_, TaggedDataSupport>`, consider using `TaggedMutSelection::<'view, Payload>::prove_at` which returns `Result<TaggedMutSelection<'_, _>, <<_ as zero_schema::__private::TaggedPayloadSupport>::Owner as OwnerAdapter>::AccessError>`
+  --> $WORKSPACE/src/tagged.rs
+   |
+   | /     pub fn prove_at<'parent, Root>(
+   | |         root: &'view mut ExclusiveInput<'parent, Root::Wire>,
+   | |         tag: Payload::Tag,
+   | |         payload_offset: usize,
+...  |
+   | |     where
+   | |         Root: SchemaSupport,
+   | |____________________________^
+help: there is an associated function `prove_at` with a similar name
+  --> $WORKSPACE/src/tagged.rs
+   |
+   | /     pub fn prove_at<'parent, Root>(
+   | |         root: &'view mut ExclusiveInput<'parent, Root::Wire>,
+   | |         tag: Payload::Tag,
+   | |         payload_offset: usize,
+...  |
+   | |     where
+   | |         Root: SchemaSupport,
+   | |____________________________^

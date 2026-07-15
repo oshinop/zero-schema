@@ -1,0 +1,17 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/36_direct_commit_token.rs:11:91
+   |
+11 |     <PublicRootPatch as SchemaPatch<Support>>::commit(&PublicRootPatch::default(), input, ());
+   |     -------------------------------------------------                                     ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: method defined here
+  --> $WORKSPACE/src/__private.rs
+   |
+   |     fn commit<'wire>(&self, input: ExclusiveInput<'wire, S::Wire>, token: S::Token);
+   |        ^^^^^^
+help: try wrapping the expression in `__zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+11 |     <PublicRootPatch as SchemaPatch<Support>>::commit(&PublicRootPatch::default(), input, __zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                                                           +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +

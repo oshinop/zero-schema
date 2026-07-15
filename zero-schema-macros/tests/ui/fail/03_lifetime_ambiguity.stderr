@@ -1,0 +1,5 @@
+error: multiple borrowed source lifetimes require #[zero(borrow = 'lifetime)]
+ --> tests/ui/fail/03_lifetime_ambiguity.rs:6:12
+  |
+6 |     left: &'a str,
+  |            ^^

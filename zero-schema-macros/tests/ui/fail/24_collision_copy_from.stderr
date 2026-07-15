@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `copy_from`
+ --> tests/ui/fail/24_collision_copy_from.rs:5:5
+  |
+5 |     copy_from: u8,
+  |     ^^^^^^^^^

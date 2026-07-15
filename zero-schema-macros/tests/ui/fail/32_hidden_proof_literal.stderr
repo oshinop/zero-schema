@@ -1,0 +1,35 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/32_hidden_proof_literal.rs:14:73
+   |
+14 |     let shared = zs::__private::SharedInput::<Wire>::from_exact(&bytes, ()).unwrap();
+   |                  ----------------------------------------------         ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                  |
+   |                  arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_opaque_fa15597ea33dbf3e::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+14 |     let shared = zs::__private::SharedInput::<Wire>::from_exact(&bytes, __zero_schema_support_opaque_fa15597ea33dbf3e::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                         +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/32_hidden_proof_literal.rs:21:83
+   |
+21 |     let exclusive = zs::__private::ExclusiveInput::<Wire>::from_exact(&mut bytes, ()).unwrap();
+   |                     -------------------------------------------------             ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |                     |
+   |                     arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_opaque_fa15597ea33dbf3e::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+21 |     let exclusive = zs::__private::ExclusiveInput::<Wire>::from_exact(&mut bytes, __zero_schema_support_opaque_fa15597ea33dbf3e::__ZeroSchemaInputAccessToken { _private: () }).unwrap();
+   |                                                                                   +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +

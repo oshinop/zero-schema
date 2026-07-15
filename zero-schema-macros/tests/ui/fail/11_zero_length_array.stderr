@@ -1,0 +1,5 @@
+error: zero-length schema arrays are unsupported
+ --> tests/ui/fail/11_zero_length_array.rs:5:18
+  |
+5 |     values: [u8; 0],
+  |                  ^

@@ -1,162 +1,130 @@
-use core::fmt::{self, Write};
-
-use zero_schema::{SchemaError, ZeroSchema};
-
+#[path = "support/capabilities.rs"]
+#[allow(dead_code)]
+mod capabilities;
 #[path = "support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "support/optional.rs"]
+#[allow(dead_code)]
+mod optional;
+#[path = "support/producer.rs"]
+#[allow(dead_code)]
+mod producer;
+
+use capabilities::{AllFeatures, AllFeaturesPatch};
 use counting_alloc::{assert_instrumentation_works, zero_allocations};
+use optional::{
+    Child, ChildPatch, EligibleTaggedRecord, OptionalRoot, OptionalRootPatch, Required, Tagged,
+    TaggedPayload, optional_root_bytes,
+};
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Direct {
-    valid: bool,
-    value: u32,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Nested {
-    marker: u8,
-    direct: Direct,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[repr(u8)]
-enum Kind {
-    Empty = 1,
-    Direct = 2,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(tag = Kind)]
-enum Internal {
-    #[zero(tag = Kind::Empty)]
-    Empty,
-    #[zero(tag = Kind::Direct)]
-    Direct(Direct),
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct External {
-    kind: Kind,
-    #[zero(tag_field = kind)]
-    payload: Internal,
-}
-
-struct StackText {
-    bytes: [u8; 256],
-    len: usize,
-}
-
-impl StackText {
-    const fn new() -> Self {
-        Self {
-            bytes: [0; 256],
-            len: 0,
-        }
-    }
-}
-
-impl Write for StackText {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        let end = self.len.checked_add(text.len()).ok_or(fmt::Error)?;
-        let destination = self.bytes.get_mut(self.len..end).ok_or(fmt::Error)?;
-        destination.copy_from_slice(text.as_bytes());
-        self.len = end;
-        Ok(())
-    }
+#[test]
+fn core_capability_operations_remain_allocation_free_on_reviewed_producer_bytes() {
+    assert_instrumentation_works();
+    let mut bytes = producer::all_features_mut();
+    zero_allocations(|| {
+        let mut view = AllFeatures::access_mut(bytes.as_bytes_mut()).unwrap();
+        assert_eq!(view.samples().get(2), Some(0x1313_1313));
+        view.samples_mut().copy_from(&[3, 5, 8]).unwrap();
+        view.copy_from(&AllFeaturesPatch::default()).unwrap();
+    });
+    zero_allocations(|| {
+        let view = AllFeatures::access(bytes.as_bytes()).unwrap();
+        assert_eq!(view.samples().copy_into(), [3, 5, 8]);
+        let _ = view.copy_into();
+    });
 }
 
 #[test]
-#[ignore = "focused single-thread allocation measurement"]
-fn generated_operations_and_errors_do_not_allocate() {
-    assert_instrumentation_works();
-    let direct = Direct {
-        valid: true,
-        value: 0x1122_3344,
-    };
-    let nested = Nested {
-        marker: 7,
-        direct: Direct {
-            valid: true,
-            value: 9,
-        },
-    };
-    let internal = Internal::Direct(Direct {
-        valid: true,
-        value: 11,
-    });
-    let external = External {
-        kind: Kind::Direct,
-        payload: Internal::Direct(Direct {
-            valid: true,
-            value: 13,
-        }),
-    };
-
-    let mut direct_buffer = zero_schema::make_buffer_for!(Direct);
-    let mut nested_buffer = zero_schema::make_buffer_for!(Nested);
-    let mut internal_buffer = zero_schema::make_buffer_for!(Internal);
-    let mut external_buffer = zero_schema::make_buffer_for!(External);
-    direct.encode_into(direct_buffer.as_bytes_mut()).unwrap();
-    nested.encode_into(nested_buffer.as_bytes_mut()).unwrap();
-    internal
-        .encode_into(internal_buffer.as_bytes_mut())
-        .unwrap();
-    external
-        .encode_into(external_buffer.as_bytes_mut())
-        .unwrap();
-
+fn zero_sentinel_access_copy_option_mut_and_patch_remain_allocation_free() {
+    let mut bytes = optional_root_bytes();
     zero_allocations(|| {
-        assert_eq!(Direct::parse(direct_buffer.as_bytes()).unwrap(), direct);
-        assert_eq!(Nested::parse(nested_buffer.as_bytes()).unwrap(), nested);
-        assert_eq!(
-            Internal::parse(internal_buffer.as_bytes()).unwrap(),
-            internal
-        );
-        assert_eq!(
-            External::parse(external_buffer.as_bytes()).unwrap(),
-            external
-        );
+        {
+            let mut root =
+                OptionalRoot::access_mut(&mut bytes).expect("absent optionals are valid");
+            {
+                let mut child = root.maybe_child_mut();
+                child
+                    .set(Some(Child {
+                        required: Required::One,
+                        payload: 23,
+                    }))
+                    .expect("initialize optional child");
+                {
+                    let mut nested = child.get_mut().expect("child is present");
+                    nested.payload_mut().set(41).expect("nested mutation");
+                }
+                assert_eq!(child.get().expect("live child").payload(), 41);
+            }
+            root.maybe_kind_mut()
+                .set(Some(Required::One))
+                .expect("initialize optional enum");
+            root.maybe_array_mut()
+                .set(Some([Required::One, Required::Two]))
+                .expect("initialize optional array");
+            root.maybe_tagged_mut()
+                .set(Some(EligibleTaggedRecord {
+                    required: Required::One,
+                    tag: Required::Two,
+                    payload: Tagged::Two(TaggedPayload {
+                        required: Required::One,
+                    }),
+                }))
+                .expect("initialize optional tagged-containing record");
+        }
+        for (payload, required) in [
+            (41, Required::Two),
+            (43, Required::One),
+            (47, Required::Two),
+            (53, Required::One),
+        ] {
+            {
+                let mut root =
+                    OptionalRoot::access_mut(&mut bytes).expect("present child is valid");
+                root.maybe_child_mut()
+                    .get_mut()
+                    .expect("child remains present")
+                    .payload_mut()
+                    .set(payload)
+                    .expect("repeated OptionMut nested mutation");
+            }
+            OptionalRoot::access_mut(&mut bytes)
+                .expect("present child is valid")
+                .copy_from(&OptionalRootPatch {
+                    maybe_child: Some(Some(ChildPatch {
+                        required: Some(required.into()),
+                        payload: None,
+                    })),
+                    ..Default::default()
+                })
+                .expect("repeated present partial optional patch");
+            let view = OptionalRoot::access(&bytes).expect("patched bytes are valid");
+            assert_eq!(view.maybe_kind(), Some(Required::One));
+            assert_eq!(
+                view.maybe_array().map(|array| array.copy_into()),
+                Some([Required::One, Required::Two])
+            );
+            assert_eq!(
+                view.maybe_tagged()
+                    .expect("tagged record remains present")
+                    .payload()
+                    .two()
+                    .expect("selected tagged payload")
+                    .required(),
+                Required::One
+            );
+            assert_eq!(
+                view.maybe_child()
+                    .expect("child remains present")
+                    .required(),
+                required
+            );
+            assert_eq!(
+                view.copy_into()
+                    .maybe_child
+                    .expect("materialized child")
+                    .payload,
+                payload
+            );
+        }
     });
-
-    zero_allocations(|| {
-        direct.encode_into(direct_buffer.as_bytes_mut()).unwrap();
-        nested.encode_into(nested_buffer.as_bytes_mut()).unwrap();
-        internal
-            .encode_into(internal_buffer.as_bytes_mut())
-            .unwrap();
-        external
-            .encode_into(external_buffer.as_bytes_mut())
-            .unwrap();
-        let reparsed = Nested::parse(nested_buffer.as_bytes()).unwrap();
-        assert_eq!(reparsed, nested);
-    });
-
-    let mut direct_invalid = zero_schema::make_buffer_for!(Direct);
-    direct_invalid
-        .as_bytes_mut()
-        .copy_from_slice(direct_buffer.as_bytes());
-    direct_invalid.as_bytes_mut()[0] = 2;
-    let direct_error = zero_allocations(|| Direct::parse(direct_invalid.as_bytes()).unwrap_err());
-
-    let mut nested_invalid = zero_schema::make_buffer_for!(Nested);
-    nested_invalid
-        .as_bytes_mut()
-        .copy_from_slice(nested_buffer.as_bytes());
-    let child_offset = Nested::LAYOUT.fields()[1].offset();
-    nested_invalid.as_bytes_mut()[child_offset] = 2;
-    let nested_error = zero_allocations(|| Nested::parse(nested_invalid.as_bytes()).unwrap_err());
-
-    let mut direct_text = StackText::new();
-    let mut nested_text = StackText::new();
-    zero_allocations(|| {
-        assert!(direct_error.child().is_none());
-        let child = nested_error.child().unwrap();
-        assert_eq!(child.schema(), "Direct");
-        assert!(core::error::Error::source(&nested_error).is_some());
-        write!(&mut direct_text, "{direct_error}").unwrap();
-        write!(&mut nested_text, "{nested_error}").unwrap();
-    });
-
-    assert!(direct_text.len > 0);
-    assert!(nested_text.len > direct_text.len);
 }

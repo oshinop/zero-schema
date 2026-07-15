@@ -6,6 +6,6 @@ rust-version = "1.85"
 publish = false
 
 [dependencies]
-zero-schema = { path = "../..", default-features = false, features = ["derive"] }
+zero-schema = { path = "../..", default-features = false }
 zero-schema-cross-crate-child = { path = "../cross-crate-child", default-features = false }
 zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }

@@ -1,0 +1,5 @@
+error: unsupported schema field type
+ --> tests/ui/fail/13_zero_sized_member.rs:5:13
+  |
+5 |     marker: (),
+  |             ^^

@@ -1,114 +1,199 @@
 # Safety
 
-## Scope
+## Scope and responsibility boundary
 
-`zero-schema` treats input as untrusted bytes and exposes borrowed views only after
-proving the required size and alignment. The publishable runtime,
-`zero-schema-derive`, and generated expansions contain no handwritten `unsafe`
-blocks or unsafe implementations. Safety relies on safe Rust plus `zerocopy`
-`FromBytes`, `KnownLayout`, and `Immutable` contracts.
+`zero-schema` is a safe observer and constrained mutator of an **already initialized**
+byte representation. The byte producer—such as a shared-memory peer, C or C++ code,
+a device, or a reviewed fixture—owns construction of that representation. The Rust
+API has no safe operation that turns arbitrary bytes into a promised-valid schema.
 
-This document covers memory safety. It does not promise that a user validator is
-pure, bounded, allocation-free, or panic-free, nor that an application publishes a
-semantically valid message before checking an encoding result.
+`access` and `access_mut` accept ordinary Rust slices, so safe Rust already prevents
+reading uninitialized memory. At an FFI or shared-memory boundary, the caller is
+responsible for establishing the corresponding conditions before constructing those
+slices. The runtime checks exact length, address alignment, and schema type validity;
+it cannot repair a producer that violates Rust's initialization, lifetime, or
+data-race rules.
 
-## Decode argument
+### Producer/consumer checklist
 
-1. Every wire type is all-bit-valid and contains no references. Aggregate and union
-   wires derive only `FromBytes`, `KnownLayout`, and `Immutable`; they do not derive
-   `IntoBytes`.
-2. Exact and prefix decoding check length before alignment. A typed view is created
-   only for the accepted byte range and only when its address satisfies the wire's
-   alignment.
-3. A decode input retains both the typed view and the exact original byte slice.
-   Checked subranges prove offset addition, bounds, and the child alignment before
-   creating another view. Padding is inspected in the original bytes rather than by
-   converting an aggregate wire to bytes.
-4. Borrowed `str` is produced only after a checked length and UTF-8 validation.
-   `CStr` requires an in-capacity NUL. Wide string views use native `u16` storage,
-   checked capacity/termination rules, and remain tied to the input lifetime.
-5. Scalar enums decode integer wire values and reject unknown discriminants. Tagged
-   unions select a payload only after decoding a known tag; no Rust union field is
-   read through an unsafe access.
-6. Generated outlives bounds allow a source borrow to be shortened but never
-   extended. The lifetime-free wire type cannot contain a second byte source.
+**Producer and storage integration** must:
 
-Consequently, successful decoding yields only owned scalar values or immutable
-borrows within the original live input slice.
+- initialize every byte in the exact root span before Rust forms a slice, including
+  parent padding, bounded-string unused capacity, and inactive union payload storage;
+- for a successful root access, provide exactly `SCHEMA_SIZE` bytes whose first byte
+  meets `SCHEMA_ALIGN`, keep the allocation live, and prevent external mutation or
+  reuse for every derived capability. Shared capabilities require a stable span;
+  constrained writes occur only through an exclusive mutable capability; and
+- write only declared scalar/string representations, and keep each external tag
+  coupled to its selected payload. `Option<T>::None` is all zeroes in its complete
+  optional field span, not a convention for parent padding.
 
-## Encode argument
+**Consumers** must:
 
-1. Public encoding checks exact destination size and alignment, then performs
-   semantic validation.
-2. The root destination is filled with zero exactly once. Nested encoders receive
-   checked, confined subranges and cannot obtain the mutable backing slice.
-3. Writes use checked offset addition and bounds. Primitive codecs write explicit
-   byte arrays. String and fixed-array codecs copy only validated logical content;
-   unused bytes remain initialized zero.
-4. Encoding never obtains bytes from aggregate or union wire values. The only
-   borrowed native-unit byte view is zerocopy's safe `IntoBytes` implementation for
-   `[u16]`.
-5. `AlignedBytes<W, N>` stores initialized `[u8; N]` and uses a zero-length wire
-   array solely to impose alignment; it does not expose `MaybeUninit`. Its byte view
-   excludes trailing stride padding. `make_buffer_for!(FullyConcreteType)` constructs it
-   without exposing the wire projection.
+- obtain a capability with `access` or `access_mut` before logical reads or writes;
+  a failed proof grants no view of the representation;
+- treat `SchemaBuffer` as aligned, initialized Rust receiving storage only. Its initial
+  zero-fill does not initialize a schema; producer bytes still require `access`; and
+- use only capability operations. Mutable field, nested, selected-payload, and option
+  handles are short reborrows; if any fallible mutation returns an error, every byte
+  of the destination root span is unchanged.
 
-For monomorphic and lifetime-only schemas, `encode()` owns its output and its return
-type is independent of borrowed input lifetimes. On error that private output is
-dropped. `encode_into` exists for caller-owned storage and fully concrete generic
-schemas. A semantic preflight failure currently leaves that destination unchanged;
-the public contract intentionally permits a later error to invalidate destination
-contents, so callers must publish only after `Ok(())`.
+Executable application paths are cross-linked here rather than reproduced as a
+tutorial: [records](examples/records.rs), [strings](examples/strings.rs),
+[zero-sentinel options](examples/optional.rs), [externally tagged payloads](examples/tagged.rs),
+[access diagnostics](examples/access_errors.rs),
+[generic receiving storage](examples/generic_receiving_buffer.rs), and
+[freestanding `no_std` access](examples/no_std_wasm.rs). The
+[example map](examples/README.md) provides their focused commands.
 
-## Layout and bounded work
+This document covers Rust memory safety and the representation guarantees made by the
+library. It does not certify an application's protocol semantics, freshness,
+authorization, cross-process synchronization, or ABI compatibility with an
+independently maintained producer.
 
-Generated constants assert wire size, alignment, stride, field offsets, and padding
-ranges. Slot multiplication and all offset/end calculations are checked. Work is
-bounded by the fixed wire size and declared capacities, except for work performed by
-user validators and caller-selected formatting/allocation. Generated codec and
-structured-error traversal paths allocate nothing; the optional owned error path
-uses `alloc` normally.
+## Access proof
 
-Validators receive immutable projected values and immutable context only. They do
-not receive source bytes or mutable destination access. Validator authors must make
-callbacks total and nonpanicking for every projected value to preserve the
-arbitrary-byte no-panic property.
+A generated root constructor applies this sequence:
 
-## Unsafe inventory
+1. It checks that the supplied span length is exactly `SCHEMA_SIZE`; size failure
+   takes precedence over an alignment failure.
+2. It checks the address against `SCHEMA_ALIGN` before forming any typed wire view.
+3. It keeps the original bounded byte input private. Every generated child selection
+   uses checked offset addition, exact subrange bounds, and required child alignment.
+4. It eagerly walks the entire logical declaration in source order. It checks Boolean
+   representations, closed scalar-enum values, active length bounds, UTF-8, required
+   narrow/wide terminators, array elements in increasing index order, nested records,
+   and the one selected payload associated with each external tag.
+5. It returns a capability only if every required check succeeded. `access_mut` runs
+   the same proof through a shared reborrow before it creates an exclusive capability.
 
-Published artifacts:
+The proof deliberately ignores ordinary compiler padding outside a zero-sentinel
+`Option` StorageWire, unused bounded-string capacity, and inactive union payload
+storage. Those ordinary ignored bytes have no logical interpretation and are never
+required to be zero. Optional StorageWire padding is the explicit exception below:
+it is presence-significant. A capability is therefore a type-valid snapshot of the
+stable bytes it borrows, not a cache of decoded values or an assertion about ignored
+storage.
 
-- `zero-schema`: no handwritten unsafe code.
-- `zero-schema-derive`: no handwritten unsafe code.
-- generated schema code: no handwritten unsafe code.
+### Zero-sentinel `Option` invariants
 
-Unpublished repository support contains the complete intentional inventory:
+An accepted `Option<T>` has no presence byte. `None` means every byte of its
+complete `FieldDescriptor::offset()..offset() + size()` storage span is zero. The
+scan and clear include field-alignment wrapper and inner padding; parent inter-field
+and root trailing padding are excluded. Any nonzero byte means `Some`, so the normal
+eager proof of `T` must succeed.
 
-- `tests/support/counting_alloc.rs`: an `unsafe impl GlobalAlloc` and calls to the
-  system allocator. Each operation forwards the allocator contract unchanged and
-  records only successful returned pointers.
-- `conformance/src/ffi.rs`: C ABI declarations and calls plus deliberately malformed
-  pointer construction for fault-precedence tests. Valid calls prove pointer
-  validity, alignment, initialized input, capacity, and writable output; malformed
-  pointers are test inputs to C++ functions whose protocol checks them before any
-  dereference.
-- `no-std-smoke/src/bin/linked-wasm.rs`: `#[unsafe(no_mangle)]` exports `_start`; its
-  body uses safe Rust and calls smoke functions.
+Eligibility is restricted to all-zero-invalid scalar-enum and schema paths, plus
+nonempty arrays of eligible elements: no valid `Some` may collide with the all-zero
+representation. This is not a general-purpose `Option` encoding. The normative
+complete-span representation and private-adapter contract are in the
+[design RFC's Option section](docs/zero-schema-design-rfc.md#74-zero-sentinel-option-representation)
+and [memory-safety argument](docs/zero-schema-design-rfc.md#14-memory-safety-argument),
+not public extension points.
 
-The C++ conformance fixture uses byte storage and `memcpy`, never type punning, and
-is exercised separately from Miri. The focused Miri suite covers Rust decoding,
-borrows, alignment failures, padding scans, union selection, errors, buffers, and
-round trips. Native sanitizer jobs cover the C++ boundary.
+No public capability exposes a wire reference, raw pointer, raw byte slice, or union
+member. Strings borrow only after their active representation is proven; scalar enums
+are returned only after their discriminant is valid; and an external union selects a
+payload only after its sibling scalar tag is valid.
 
-## Interoperability boundary
+## Borrowing and zero-copy capabilities
 
-Memory safety does not make two independently compiled layouts compatible. A
-conforming C++ mirror must match the target ABI/data model/endian profile, use
-C++17 exact-width types and default non-packed layout, and satisfy the generated
-size/alignment/offset assertions. Packing, bitfields, C++ `bool` or enum storage,
-`wchar_t`, ABI-changing flags, and unmatched native-wide endianness are outside the
-contract. The conformance build generates unpublished test mirrors only; there is no
-consumer header generator or fingerprint-based negotiation.
+A shared root capability is `Copy + Clone`. Its scalar getters return values and its
+borrowed string/fixed-byte getters are constrained to the source lifetime. A mutable
+root capability is exclusive and non-`Copy`.
 
-Security or safety concerns should be reported privately to the project maintainers
-through the hosting platform's security-reporting channel when one is configured.
+A mutable read borrows through `&self` for only the current shared reborrow. A mutable
+field method produces a short, field-local exclusive capability. Nested and selected
+payload mutation use the same rule. This prevents safe callers from holding a mutable
+aggregate view, raw storage access, or an independently mutable external tag while
+also observing another part of the schema. It also lets the implementation revisit
+private bounded ranges rather than manufacture overlapping mutable references.
+
+Array capabilities maintain O(1) state. Their element lookups, iteration, and logical
+materialization use bounded indexed selections; no decoded aggregate or heap proxy
+collection is retained by the capability.
+
+`OptionMut<'view, T, _>` is equally O(1) and field-local. `get()` and `get_mut()`
+rescan the live complete field span rather than cache presence. A child from
+`get_mut()` holds the short exclusive reborrow; `set(None)` cannot overlap it and
+zeroes only the complete optional field span. `set(Some(value))` preflights the
+inner initialization before it writes, so a source error leaves that field unchanged.
+
+## Constrained mutation and atomicity
+
+Mutation starts only after `access_mut` has established type validity. Field handles
+validate all fallible source conditions before their first write. This includes string
+capacity and length representability, fixed-byte and array length, element conversion,
+nested inputs, and optional inner initialization. Any fallible mutation error leaves
+every byte of the destination root span byte-for-byte unchanged.
+
+`ArrayMut::copy_from` validates the complete source slice and each element before it
+commits any element. Generated record and tagged-payload patches use the same two-pass
+rule: recursively validate every present member and external-tag relationship, then
+perform bounded infallible writes. An optional patch entry is `Option<Option<P>>`:
+outer `None` retains, `Some(None)` clears, and `Some(Some(P))` updates a present field
+or promotes an absent field only when `P` is complete. An absent incomplete promotion
+reports `IncompleteOptionalInitialization` before its inner preflight; any patch error
+leaves every destination byte unchanged.
+
+An external union has a single coordinator: its payload capability. There is no
+independent tag-field mutation method. A patch that switches variants must be
+recursively complete; the commit writes the new selected payload first and the
+external scalar tag last. A tag-only or mismatched tag/payload patch fails before a
+write. Successful constrained mutation retains type validity, so a fresh `access`
+observes the new logical state.
+
+A data-carrying tagged enum is not root-accessible or root-bufferable: only its
+containing record supplies the external tag location. The record keeps that tag and
+payload coupled throughout proof and mutation.
+
+## Layout, bounded work, and allocation
+
+Generated constants assert root and child size, alignment, stride, offsets, array
+stride, and nonzero layout constraints. Offset arithmetic is checked before use. The
+work of proof, field reads, mutation, array traversal, external-union selection,
+optional complete-span scans/clears, logical materialization, patches, layout
+inspection, and structured-error traversal is bounded by the fixed representation and
+declared capacities; these core operations allocate nothing.
+
+`LAYOUT` is diagnostic metadata only. It describes the compiler-derived ABI shape,
+including padding ranges and `FieldDescriptor::is_optional()`, but it never selects
+memory or relaxes access checks. The optional protocol derives from that field's exact
+descriptor span, not from generic parent padding metadata. Allocation may occur only
+in caller code or optional convenience APIs such as an owned formatted error path
+enabled by `alloc`.
+
+## Normative design and evidence
+
+The [normative design RFC](docs/zero-schema-design-rfc.md) defines the complete
+representation and generated-proof model; its [memory-safety argument](docs/zero-schema-design-rfc.md#14-memory-safety-argument)
+and [stable-snapshot boundary](docs/zero-schema-design-rfc.md#15-stable-snapshots-and-concurrency)
+are authoritative for private implementation details. This page states the
+application responsibility boundary and public invariants without making those private
+forms extension points.
+
+The [C++ conformance and reviewed-fixture evidence](TESTING.md#c-conformance-and-reviewed-fixtures)
+checks selected target profiles through C++ producer/observer fixtures and Rust
+capabilities. It is evidence for those profiles, not a generated C++ header, a
+producer implementation, or a compatibility negotiation protocol.
+
+## Interoperability
+
+Memory safety is not a declaration that independently compiled layouts are compatible.
+A C or C++ producer must use the same target ABI/data model, compiler flags, and endian
+profile; fixed-width integer storage; and default non-packed layout. Each integration
+must retain target-side layout assertions—`static_assert` in C++ or `_Static_assert` in
+C—for root and payload size/alignment, relevant field `offsetof`, array stride,
+optional-field size, external-tag offset, and scalar representations. C/C++ `bool`,
+enum storage, `wchar_t`, bitfields, pointer punning, packing directives, and
+ABI-changing compiler flags are outside the contract.
+
+Inline C values have no universal `NULL`: optional absence is the explicit all-zero
+complete optional field representation, produced only after every transported byte is
+initialized (for example, `memset(&record.field, 0, sizeof record.field)`). Parent
+padding is still initialized transport storage, but it is not part of the optional
+presence scan. The [RFC interoperability requirements](docs/zero-schema-design-rfc.md#17-c-and-c-interoperability)
+and linked conformance evidence above define the supported boundary.
+
+Report security concerns through the project's private security-reporting channel on
+the hosting platform when one is available.

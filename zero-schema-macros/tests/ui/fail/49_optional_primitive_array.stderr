@@ -1,0 +1,11 @@
+error: Option<[T; N]> requires an all-zero-invalid scalar-enum or schema element
+ --> tests/ui/fail/49_optional_primitive_array.rs:5:20
+  |
+5 |     value: Option<[u8; 2]>,
+  |                    ^^
+
+error: Option<[T; N]> requires an all-zero-invalid scalar-enum or schema element
+  --> tests/ui/fail/49_optional_primitive_array.rs:10:20
+   |
+10 |     value: Option<[bool; 2]>,
+   |                    ^^^^

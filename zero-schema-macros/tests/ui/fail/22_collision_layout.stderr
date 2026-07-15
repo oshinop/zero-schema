@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `LAYOUT`
+ --> tests/ui/fail/22_collision_layout.rs:5:5
+  |
+5 |     LAYOUT: u8,
+  |     ^^^^^^

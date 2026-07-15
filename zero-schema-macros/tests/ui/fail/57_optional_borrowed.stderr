@@ -1,0 +1,5 @@
+error: Option<T> cannot use string or fixed-byte T because the all-zero wire can be valid
+ --> tests/ui/fail/57_optional_borrowed.rs:5:18
+  |
+5 |     text: Option<&'static str>,
+  |                  ^

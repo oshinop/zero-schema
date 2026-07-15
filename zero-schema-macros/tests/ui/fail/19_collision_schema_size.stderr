@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `SCHEMA_SIZE`
+ --> tests/ui/fail/19_collision_schema_size.rs:5:5
+  |
+5 |     SCHEMA_SIZE: u8,
+  |     ^^^^^^^^^^^

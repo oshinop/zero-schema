@@ -1,0 +1,5 @@
+error: zero-length schema arrays are unsupported
+  --> tests/ui/fail/68_optional_zero_length_array.rs:12:31
+   |
+12 |     values: Option<[Required; 0]>,
+   |                               ^

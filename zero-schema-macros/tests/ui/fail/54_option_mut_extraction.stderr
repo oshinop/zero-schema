@@ -1,0 +1,11 @@
+error[E0451]: field `input` of struct `OptionMut` is private
+  --> tests/ui/fail/54_option_mut_extraction.rs:28:25
+   |
+28 |     let zs::OptionMut { mut input, token, .. } = root.maybe_mut();
+   |                         ^^^^^^^^^ private field
+
+error[E0451]: field `token` of struct `OptionMut` is private
+  --> tests/ui/fail/54_option_mut_extraction.rs:28:36
+   |
+28 |     let zs::OptionMut { mut input, token, .. } = root.maybe_mut();
+   |                                    ^^^^^ private field

@@ -1,0 +1,5 @@
+error: tag_field cannot be applied to Option<T>; an externally tagged payload has no standalone optional sentinel
+  --> tests/ui/fail/46_optional_tagged_payload.rs:13:24
+   |
+13 |     #[zero(tag_field = tag)]
+   |                        ^^^

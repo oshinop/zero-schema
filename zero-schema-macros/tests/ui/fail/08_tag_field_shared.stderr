@@ -1,0 +1,5 @@
+error: each external tag field may be used by exactly one tagged payload
+  --> tests/ui/fail/08_tag_field_shared.rs:28:24
+   |
+28 |     #[zero(tag_field = tag)]
+   |                        ^^^

@@ -1,0 +1,5 @@
+error: Option<[T; N]> requires an all-zero-invalid scalar-enum or schema element
+ --> tests/ui/fail/62_optional_std_bool_array.rs:5:20
+  |
+5 |     value: Option<[std::primitive::bool; 2]>,
+  |                    ^^^

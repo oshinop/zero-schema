@@ -1,0 +1,5 @@
+error: Option<T> cannot use a primitive or bool T because the all-zero wire is valid
+ --> tests/ui/fail/41_optional_primitive.rs:5:19
+  |
+5 |     value: Option<u8>,
+  |                   ^^

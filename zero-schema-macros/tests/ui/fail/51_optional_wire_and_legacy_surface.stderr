@@ -1,0 +1,69 @@
+error[E0277]: the trait bound `ForgedZero: __private::zero_state_sealed::Sealed` is not satisfied
+ --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:7:20
+  |
+7 | impl ZeroState for ForgedZero {
+  |                    ^^^^^^^^^^ the trait `__private::zero_state_sealed::Sealed` is not implemented for `ForgedZero`
+  |
+  = help: the following other types implement trait `__private::zero_state_sealed::Sealed`:
+            ZeroInvalid
+            ZeroValid
+note: required by a bound in `ZeroState`
+ --> $WORKSPACE/src/__private.rs
+  |
+  | pub trait ZeroState: zero_state_sealed::Sealed {
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `ZeroState`
+  = note: `ZeroState` is a "sealed trait", because to implement it you also need to implement `zero_schema::__private::zero_state_sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+  = help: the following types implement the trait:
+            zero_schema::__private::ZeroValid
+            zero_schema::__private::ZeroInvalid
+
+error[E0046]: not all trait items implemented, missing: `And`
+ --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:7:1
+  |
+7 | impl ZeroState for ForgedZero {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `And` in implementation
+  |
+  = help: implement the missing item: `type And<Rhs> = /* Type */ where Rhs: ZeroState;`
+
+error[E0616]: field `maybe` of struct `OptionalRootWire` is private
+  --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:36:25
+   |
+36 |     let _storage = wire.maybe;
+   |                         ^^^^^ private field
+
+error[E0277]: the trait bound `OptionalRootWire: IntoBytes` is not satisfied
+  --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:37:24
+   |
+37 |     require_into_bytes(wire);
+   |     ------------------ ^^^^ the trait `IntoBytes` is not implemented for `OptionalRootWire`
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = note: Consider adding `#[derive(IntoBytes)]` to `OptionalRootWire`
+   = help: the following other types implement trait `IntoBytes`:
+             ()
+             AtomicBool
+             AtomicI16
+             AtomicI32
+             AtomicI64
+             AtomicI8
+             AtomicIsize
+             AtomicU16
+           and $N others
+note: required by a bound in `require_into_bytes`
+  --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:28:26
+   |
+28 | fn require_into_bytes<T: IntoBytes>(_: &T) {}
+   |                          ^^^^^^^^^ required by this bound in `require_into_bytes`
+
+error[E0277]: the trait bound `OptionalRootWire: std::marker::Copy` is not satisfied
+  --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:38:20
+   |
+38 |     require_copy::<Wire>();
+   |                    ^^^^ the trait `std::marker::Copy` is not implemented for `OptionalRootWire`
+   |
+note: required by a bound in `require_copy`
+  --> tests/ui/fail/51_optional_wire_and_legacy_surface.rs:29:20
+   |
+29 | fn require_copy<T: Copy>() {}
+   |                    ^^^^ required by this bound in `require_copy`

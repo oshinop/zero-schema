@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::collections::{BTreeMap, BTreeSet};
 use syn::parse::{Parse, ParseStream};
 use syn::{Attribute, Expr, Fields, File, GenericParam, Item, Lit, Meta, Token, Type as SynType};
@@ -54,7 +55,9 @@ pub enum Type {
     Bool,
     String(StringKind),
     FixedBytes(u32),
+    Array { element: Box<Type>, length: u32 },
     Schema(String),
+    Option(Box<Type>),
 }
 #[derive(Clone, Debug)]
 pub struct Field {
@@ -64,7 +67,6 @@ pub struct Field {
     pub align: Option<u32>,
     pub capacity: Option<u32>,
     pub len: Option<(IntWidth, Endian)>,
-    pub tail_zero: bool,
     pub tag_field: Option<String>,
 }
 #[derive(Clone, Debug)]
@@ -98,18 +100,6 @@ pub struct Schema {
     pub name: String,
     pub kind: SchemaKind,
     pub align: Option<u32>,
-    pub tail_zero: bool,
-}
-#[derive(Clone, Debug)]
-pub struct AbiField {
-    pub name: String,
-    pub ty: String,
-}
-#[derive(Clone, Debug)]
-pub struct AbiStruct {
-    pub name: String,
-    pub align: Option<u32>,
-    pub fields: Vec<AbiField>,
 }
 #[derive(Clone, Debug)]
 pub struct RootRegistration {
@@ -119,7 +109,6 @@ pub struct RootRegistration {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Root {
     Schema(String),
-    Abi(String),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
@@ -137,7 +126,9 @@ pub enum Value {
     },
     Bytes(Vec<u8>),
     Units(Vec<u16>),
-    Zst,
+    Array(Vec<Value>),
+    None,
+    Some(Box<Value>),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Metric {
@@ -147,6 +138,12 @@ pub enum Metric {
     FieldOffset(String),
     FieldSize(String),
     FieldAlign(String),
+    ArrayLength(String),
+    ArrayStride(String),
+    OptionalSpan(String),
+    OptionalIsOptional(String),
+    OptionalArrayLength(String),
+    OptionalArrayStride(String),
     TagOffset,
     PayloadOffset,
     PayloadSize,
@@ -169,7 +166,6 @@ pub enum Metric {
     StringLengthWidth(String),
     StringLengthEndian(String),
     StringLengthOffset(String),
-    StringTail(String),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Observation {
@@ -177,6 +173,8 @@ pub enum Observation {
     Tag(Vec<String>),
     Length(Vec<String>),
     Unit(Vec<String>, u32),
+    Element(Vec<String>, u32),
+    Optional(Vec<String>),
 }
 #[derive(Clone, Debug)]
 pub struct MetricEntry {
@@ -193,6 +191,7 @@ pub struct Case {
     pub id: u32,
     pub root_id: String,
     pub root: Root,
+    pub native: bool,
     pub value: Value,
     pub layout: Vec<MetricEntry>,
     pub observe: Vec<ObservationEntry>,
@@ -200,7 +199,6 @@ pub struct Case {
 #[derive(Clone, Debug)]
 pub struct Model {
     pub schemas: Vec<Schema>,
-    pub abi_structs: Vec<AbiStruct>,
     pub cases: Vec<Case>,
 }
 impl Model {
@@ -210,20 +208,12 @@ impl Model {
             .find(|x| x.name == n)
             .unwrap_or_else(|| die(format!("unknown schema {n}")))
     }
-    pub fn abi(&self, n: &str) -> &AbiStruct {
-        self.abi_structs
-            .iter()
-            .find(|x| x.name == n)
-            .unwrap_or_else(|| die(format!("unknown ABI type {n}")))
-    }
 }
 
 #[derive(Default)]
 struct Zero {
     endian: Option<Endian>,
     align: Option<u32>,
-    padding_zero: bool,
-    tail_zero: bool,
     capacity: Option<u32>,
     len: Option<IntWidth>,
     tag: Option<String>,
@@ -251,7 +241,7 @@ fn attrs(attrs: &[Attribute], allow_naming: bool) -> (Zero, Option<IntWidth>) {
                 };
                 if !matches!(
                     i.to_string().as_str(),
-                    "Debug" | "PartialEq" | "Eq" | "ZeroSchema"
+                    "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq"
                 ) {
                     die("unsupported derive")
                 }
@@ -293,7 +283,10 @@ fn attrs(attrs: &[Attribute], allow_naming: bool) -> (Zero, Option<IntWidth>) {
         }
         if a.path().is_ident("zero") {
             let Meta::List(l) = &a.meta else {
-                die("zero must be list")
+                if matches!(a.meta, Meta::Path(_)) {
+                    continue;
+                }
+                die("zero must be a marker or option list")
             };
             l.parse_nested_meta(|m| {
                 let key = m
@@ -310,17 +303,6 @@ fn attrs(attrs: &[Attribute], allow_naming: bool) -> (Zero, Option<IntWidth>) {
                             "big" => Endian::Big,
                             _ => return Err(m.error("invalid endian")),
                         })
-                    }
-                    "padding" | "tail" => {
-                        let s: syn::LitStr = m.value()?.parse()?;
-                        if s.value() != "zero" {
-                            return Err(m.error("only zero policy accepted"));
-                        };
-                        if key == "padding" {
-                            z.padding_zero = true
-                        } else {
-                            z.tail_zero = true
-                        }
                     }
                     "capacity" => {
                         let l: syn::LitInt = m.value()?.parse()?;
@@ -381,9 +363,46 @@ fn width_path(p: &syn::Path) -> IntWidth {
         _ => die("width must be u8/u16/u32"),
     }
 }
+fn option_inner(p: &syn::TypePath) -> Option<&SynType> {
+    if p.qself.is_some() || p.path.leading_colon.is_some() {
+        return None;
+    }
+    let segments: Vec<_> = p.path.segments.iter().collect();
+    let canonical = match segments.as_slice() {
+        [option] => name(&option.ident) == "Option",
+        [namespace, option_module, option]
+            if matches!(name(&namespace.ident).as_str(), "core" | "std") =>
+        {
+            name(&option_module.ident) == "option" && name(&option.ident) == "Option"
+        }
+        _ => false,
+    };
+    if !canonical {
+        return None;
+    }
+    if segments[..segments.len() - 1]
+        .iter()
+        .any(|segment| !matches!(segment.arguments, syn::PathArguments::None))
+    {
+        die("canonical Option namespace cannot be generic")
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segments.last().unwrap().arguments else {
+        die("Option requires exactly one type argument")
+    };
+    if arguments.args.len() != 1 {
+        die("Option requires exactly one type argument")
+    }
+    match arguments.args.first().unwrap() {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => die("Option requires a type argument"),
+    }
+}
 fn classify(t: &SynType) -> Type {
     match t {
         SynType::Path(p) if p.qself.is_none() => {
+            if let Some(inner) = option_inner(p) {
+                return Type::Option(Box::new(classify(inner)));
+            }
             let v = simple_path(&p.path);
             if v.len() != 1 {
                 die("qualified field type forbidden")
@@ -403,6 +422,26 @@ fn classify(t: &SynType) -> Type {
                 x => Type::Schema(x.to_owned()),
             }
         }
+        SynType::Array(array) => {
+            let Expr::Lit(length) = &array.len else {
+                die("array length literal required")
+            };
+            let Lit::Int(length) = &length.lit else {
+                die("array length integer required")
+            };
+            let length = u32::try_from(uint(length)).unwrap_or_else(|_| die("array too large"));
+            if length == 0 {
+                die("array length must be nonzero")
+            }
+            let element = classify(&array.elem);
+            if !matches!(element, Type::Primitive(_) | Type::Bool | Type::Schema(_)) {
+                die("unsupported array element type")
+            }
+            Type::Array {
+                element: Box::new(element),
+                length,
+            }
+        }
         SynType::Reference(r) if r.mutability.is_none() && r.lifetime.is_some() => match &*r.elem {
             SynType::Path(p) if p.qself.is_none() => match simple_path(&p.path).as_slice() {
                 [x] if x == "str" => Type::String(StringKind::Utf8),
@@ -411,21 +450,66 @@ fn classify(t: &SynType) -> Type {
                 [x] if x == "U16CStr" => Type::String(StringKind::U16C),
                 _ => die("unsupported reference type"),
             },
-            SynType::Array(a) => {
-                if !matches!(&*a.elem,SynType::Path(p) if p.path.is_ident("u8")) {
+            SynType::Array(array) => {
+                if !matches!(&*array.elem, SynType::Path(path) if path.path.is_ident("u8")) {
                     die("only byte fixed arrays accepted")
                 };
-                let Expr::Lit(e) = &a.len else {
+                let Expr::Lit(length) = &array.len else {
                     die("array length literal required")
                 };
-                let Lit::Int(l) = &e.lit else {
+                let Lit::Int(length) = &length.lit else {
                     die("array length integer required")
                 };
-                Type::FixedBytes(u32::try_from(uint(l)).unwrap_or_else(|_| die("array too large")))
+                let length = u32::try_from(uint(length)).unwrap_or_else(|_| die("array too large"));
+                if length == 0 {
+                    die("fixed byte length must be nonzero")
+                }
+                Type::FixedBytes(length)
             }
             _ => die("unsupported reference"),
         },
         _ => die("unsupported type"),
+    }
+}
+fn schema_refs<'a>(ty: &'a Type, refs: &mut Vec<&'a str>) {
+    match ty {
+        Type::Schema(name) => refs.push(name),
+        Type::Array { element, .. } | Type::Option(element) => schema_refs(element, refs),
+        Type::Primitive(_) | Type::Bool | Type::String(_) | Type::FixedBytes(_) => {}
+    }
+}
+fn type_is_all_zero_invalid(ty: &Type, schemas: &BTreeMap<&str, &Schema>) -> bool {
+    match ty {
+        Type::Schema(name) => schema_is_all_zero_invalid(name, schemas),
+        Type::Array { element, length } => {
+            *length != 0 && type_is_all_zero_invalid(element, schemas)
+        }
+        Type::Option(_)
+        | Type::Primitive(_)
+        | Type::Bool
+        | Type::String(_)
+        | Type::FixedBytes(_) => false,
+    }
+}
+fn schema_is_all_zero_invalid(name: &str, schemas: &BTreeMap<&str, &Schema>) -> bool {
+    match &schemas[name].kind {
+        SchemaKind::ScalarEnum { variants, .. } => {
+            !variants.is_empty() && variants.iter().all(|variant| variant.raw != 0)
+        }
+        SchemaKind::Struct { fields } => fields
+            .iter()
+            .any(|field| type_is_all_zero_invalid(&field.ty, schemas)),
+        SchemaKind::TaggedEnum { .. } => false,
+    }
+}
+fn option_type_is_zero_sentinel_eligible(ty: &Type, schemas: &BTreeMap<&str, &Schema>) -> bool {
+    match ty {
+        Type::Schema(name) => schema_is_all_zero_invalid(name, schemas),
+        Type::Array { element, length } if *length != 0 => {
+            matches!(element.as_ref(), Type::Schema(_))
+                && type_is_all_zero_invalid(element, schemas)
+        }
+        _ => false,
     }
 }
 
@@ -470,7 +554,7 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                     };
                     let id = f.ident.as_ref().unwrap();
                     let (o, r) = attrs(&f.attrs, false);
-                    if r.is_some() || o.padding_zero || o.tag.is_some() {
+                    if r.is_some() || o.tag.is_some() {
                         die("invalid field options")
                     };
                     let ty = classify(&f.ty);
@@ -478,16 +562,30 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                         die(format!("string capacity mismatch on {id}"))
                     };
                     if matches!(ty, Type::FixedBytes(_))
+                        && [o.capacity.is_some(), o.len.is_some(), o.endian.is_some()]
+                            .into_iter()
+                            .any(|x| x)
+                    {
+                        die("options on fixed bytes")
+                    };
+                    if matches!(ty, Type::Array { .. })
+                        && [o.capacity.is_some(), o.len.is_some(), o.endian.is_some()]
+                            .into_iter()
+                            .any(|present| present)
+                    {
+                        die("array options are not applicable")
+                    };
+                    if matches!(ty, Type::Option(_))
                         && [
                             o.capacity.is_some(),
                             o.len.is_some(),
-                            o.tail_zero,
                             o.endian.is_some(),
+                            o.tag_field.is_some(),
                         ]
                         .into_iter()
-                        .any(|x| x)
+                        .any(|present| present)
                     {
-                        die("options on fixed bytes")
+                        die("only align is applicable to Option fields")
                     };
                     if !matches!(ty, Type::String(StringKind::Utf8 | StringKind::U16))
                         && o.len.is_some()
@@ -502,7 +600,6 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                         align: o.align,
                         capacity: o.capacity,
                         len: o.len.map(|w| (w, endian)),
-                        tail_zero: o.tail_zero,
                         tag_field: o.tag_field,
                     })
                 }
@@ -510,7 +607,6 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                     name: name(&s.ident),
                     kind: SchemaKind::Struct { fields },
                     align: z.align,
-                    tail_zero: false,
                 })
             }
             Item::Enum(e) => {
@@ -521,60 +617,70 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                     die("invalid enum declaration")
                 };
                 let (z, repr) = attrs(&e.attrs, true);
-                if let Some(tag) = z.tag {
-                    if repr.is_some() || z.endian.is_some() || z.padding_zero {
-                        die("invalid tagged options")
+                if repr.is_none() {
+                    if z.tag.is_some() || z.endian.is_some() {
+                        die("invalid tagged container options")
                     };
+                    let mut tag = None;
                     let mut variants = Vec::new();
-                    for v in &e.variants {
-                        if v.discriminant.is_some() {
+                    for variant in &e.variants {
+                        if variant.discriminant.is_some() {
                             die("tagged discriminants forbidden")
                         };
-                        let (o, r) = attrs(&v.attrs, false);
-                        if r.is_some()
-                            || o.tag.is_none()
+                        let (options, variant_repr) = attrs(&variant.attrs, false);
+                        if variant_repr.is_some()
+                            || options.tag.is_none()
                             || [
-                                o.endian.is_some(),
-                                o.align.is_some(),
-                                o.capacity.is_some(),
-                                o.len.is_some(),
-                                o.tag_field.is_some(),
+                                options.endian.is_some(),
+                                options.align.is_some(),
+                                options.capacity.is_some(),
+                                options.len.is_some(),
+                                options.tag_field.is_some(),
                             ]
                             .into_iter()
-                            .any(|x| x)
+                            .any(|present| present)
                         {
                             die("tagged variant requires only tag")
                         };
-                        let p = o.tag.unwrap();
-                        let ps = p.split("::").collect::<Vec<_>>();
-                        if ps.len() != 2 || ps[0] != tag {
-                            die("variant tag type mismatch")
-                        };
-                        let payload = match &v.fields {
+                        let path = options.tag.unwrap();
+                        let parts = path.split("::").collect::<Vec<_>>();
+                        if parts.len() != 2 {
+                            die("tagged variant tag must name enum and variant")
+                        }
+                        match &tag {
+                            Some(existing) if existing != parts[0] => {
+                                die("tagged variants must share one scalar enum")
+                            }
+                            Some(_) => {}
+                            None => tag = Some(parts[0].to_owned()),
+                        }
+                        let payload = match &variant.fields {
                             Fields::Unit => None,
-                            Fields::Unnamed(x) if x.unnamed.len() == 1 => {
-                                match classify(&x.unnamed[0].ty) {
-                                    Type::Schema(n) => Some(n),
+                            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                                match classify(&fields.unnamed[0].ty) {
+                                    Type::Schema(name) => Some(name),
                                     _ => die("tag payload must be schema"),
                                 }
                             }
                             _ => die("tag variant must unit/newtype"),
                         };
                         variants.push(TaggedVariant {
-                            name: name(&v.ident),
-                            tag_variant: ps[1].to_owned(),
+                            name: name(&variant.ident),
+                            tag_variant: parts[1].to_owned(),
                             payload,
                         })
                     }
                     schemas.push(Schema {
                         name: name(&e.ident),
-                        kind: SchemaKind::TaggedEnum { tag, variants },
+                        kind: SchemaKind::TaggedEnum {
+                            tag: tag.unwrap_or_else(|| die("tagged enum requires a variant")),
+                            variants,
+                        },
                         align: z.align,
-                        tail_zero: z.tail_zero,
                     })
                 } else {
                     let repr = repr.unwrap_or_else(|| die("scalar enum repr required"));
-                    if z.align.is_some() || z.padding_zero || z.tail_zero {
+                    if z.align.is_some() {
                         die("invalid scalar enum options")
                     };
                     let mut variants = Vec::new();
@@ -610,7 +716,6 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
                             variants,
                         },
                         align: None,
-                        tail_zero: false,
                     })
                 }
             }
@@ -630,7 +735,7 @@ fn parse_corpus(f: &File) -> (Vec<Schema>, Vec<RootRegistration>) {
         != BTreeSet::from([
             "core::ffi::CStr".to_owned(),
             "widestring::{U16CStr,U16Str}".to_owned(),
-            "zero_schema::ZeroSchema".to_owned(),
+            "zero_schema::zero".to_owned(),
         ])
     {
         die("imports differ from frozen set")
@@ -705,12 +810,26 @@ impl Parse for Cases {
             if pn.len() != 1 {
                 return Err(b.error("simple root required"));
             };
-            let root = match rk.to_string().as_str() {
-                "schema" => Root::Schema(pn[0].clone()),
-                "abi" => Root::Abi(pn[0].clone()),
-                _ => return Err(b.error("root kind")),
-            };
+            if rk != "schema" {
+                return Err(b.error("conformance root must be a schema"));
+            }
+            let root = Root::Schema(pn[0].clone());
             comma(&b)?;
+            let native = {
+                let lookahead = b.fork();
+                let next: syn::Ident = lookahead.parse()?;
+                if next == "native" {
+                    field(&b, "native")?;
+                    let enabled: syn::LitBool = b.parse()?;
+                    if !enabled.value {
+                        return Err(b.error("native marker must be true"));
+                    }
+                    comma(&b)?;
+                    true
+                } else {
+                    false
+                }
+            };
             field(&b, "value")?;
             let value = parse_value(&b)?;
             comma(&b)?;
@@ -731,6 +850,7 @@ impl Parse for Cases {
                 id: u32::try_from(uint(&idl)).unwrap_or_else(|_| die("id overflow")),
                 root_id: rid.value(),
                 root,
+                native,
                 value,
                 layout,
                 observe,
@@ -753,6 +873,16 @@ fn comma(i: ParseStream<'_>) -> syn::Result<()> {
 fn parse_value(i: ParseStream<'_>) -> syn::Result<Value> {
     let k: syn::Ident = i.parse()?;
     match k.to_string().as_str() {
+        "none" => Ok(Value::None),
+        "some" => {
+            let p;
+            syn::parenthesized!(p in i);
+            let value = parse_value(&p)?;
+            if !p.is_empty() {
+                return Err(p.error("some trailing"));
+            }
+            Ok(Value::Some(Box::new(value)))
+        }
         "record" => Ok(Value::Record(named_values(i)?)),
         "union" => {
             let p;
@@ -802,6 +932,25 @@ fn parse_value(i: ParseStream<'_>) -> syn::Result<Value> {
                 variant: x[1].clone(),
             })
         }
+        "array" => {
+            let parenthesized;
+            syn::parenthesized!(parenthesized in i);
+            let bracketed;
+            syn::bracketed!(bracketed in parenthesized);
+            let mut values = Vec::new();
+            while !bracketed.is_empty() {
+                values.push(parse_value(&bracketed)?);
+                if bracketed.peek(Token![,]) {
+                    comma(&bracketed)?;
+                } else if !bracketed.is_empty() {
+                    return Err(bracketed.error("array comma required"));
+                }
+            }
+            if !parenthesized.is_empty() {
+                return Err(parenthesized.error("array trailing"));
+            }
+            Ok(Value::Array(values))
+        }
         "bytes" | "units" => {
             let p;
             syn::parenthesized!(p in i);
@@ -825,7 +974,6 @@ fn parse_value(i: ParseStream<'_>) -> syn::Result<Value> {
                 ))
             }
         }
-        "zst" => Ok(Value::Zst),
         _ => Err(syn::Error::new(k.span(), "unknown value form")),
     }
 }
@@ -879,6 +1027,12 @@ fn metric(n: &str, a: Vec<String>) -> Metric {
         "field_offset" => one!(FieldOffset),
         "field_size" => one!(FieldSize),
         "field_align" => one!(FieldAlign),
+        "array_length" => one!(ArrayLength),
+        "array_stride" => one!(ArrayStride),
+        "optional_span" => one!(OptionalSpan),
+        "optional_is_optional" => one!(OptionalIsOptional),
+        "optional_array_length" => one!(OptionalArrayLength),
+        "optional_array_stride" => one!(OptionalArrayStride),
         "tag_offset" if a.is_empty() => Metric::TagOffset,
         "payload_offset" if a.is_empty() => Metric::PayloadOffset,
         "payload_size" if a.is_empty() => Metric::PayloadSize,
@@ -901,7 +1055,6 @@ fn metric(n: &str, a: Vec<String>) -> Metric {
         "string_length_width" => one!(StringLengthWidth),
         "string_length_endian" => one!(StringLengthEndian),
         "string_length_offset" => one!(StringLengthOffset),
-        "string_tail" => one!(StringTail),
         _ => die(format!("unknown metric {n}")),
     }
 }
@@ -958,20 +1111,23 @@ fn parse_obs(i: ParseStream<'_>) -> syn::Result<Vec<ObservationEntry>> {
         let n: syn::Ident = e.parse()?;
         let p;
         syn::parenthesized!(p in e);
-        let source = if n == "unit" {
+        let source = if n == "unit" || n == "element" {
             let path = dotted(&p)?;
             p.parse::<Token![,]>()?;
             let index: syn::LitInt = p.parse()?;
-            Observation::Unit(
-                path,
-                u32::try_from(uint(&index)).unwrap_or_else(|_| die("unit index")),
-            )
+            let index = u32::try_from(uint(&index)).unwrap_or_else(|_| die("array index"));
+            if n == "unit" {
+                Observation::Unit(path, index)
+            } else {
+                Observation::Element(path, index)
+            }
         } else {
             let path = dotted(&p)?;
             match n.to_string().as_str() {
                 "scalar" => Observation::Scalar(path),
                 "tag" => Observation::Tag(path),
                 "length" => Observation::Length(path),
+                "optional" => Observation::Optional(path),
                 _ => return Err(e.error("unknown observation")),
             }
         };
@@ -995,219 +1151,250 @@ fn parse_obs(i: ParseStream<'_>) -> syn::Result<Vec<ObservationEntry>> {
     Ok(v)
 }
 
-fn parse_cases(f: &File) -> (Vec<AbiStruct>, Vec<Case>) {
-    let mut abi = Vec::new();
+fn parse_cases(f: &File) -> Vec<Case> {
     let mut cases = None;
-    for x in &f.items {
-        match x {
-            Item::Struct(s) => {
-                if !matches!(s.vis, syn::Visibility::Inherited)
-                    || !s.generics.params.is_empty()
-                    || s.generics.where_clause.is_some()
-                {
-                    die("invalid ABI struct")
-                };
-                let (z, r) = attrs(&s.attrs, false);
-                if r.is_some()
-                    || z.padding_zero
-                    || z.tail_zero
-                    || z.endian.is_some()
-                    || z.tag.is_some()
-                {
-                    die("invalid ABI repr")
-                };
-                let fields = match &s.fields {
-                    Fields::Unit => Vec::new(),
-                    Fields::Named(n) => n
-                        .named
-                        .iter()
-                        .map(|f| {
-                            if !f.attrs.is_empty() || !matches!(f.vis, syn::Visibility::Inherited) {
-                                die("invalid ABI field")
-                            };
-                            let SynType::Path(p) = &f.ty else {
-                                die("ABI simple type")
-                            };
-                            AbiField {
-                                name: name(f.ident.as_ref().unwrap()),
-                                ty: simple_path(&p.path).join("::"),
-                            }
-                        })
-                        .collect(),
-                    _ => die("ABI named/unit only"),
-                };
-                abi.push(AbiStruct {
-                    name: name(&s.ident),
-                    align: z.align,
-                    fields,
-                })
-            }
-            Item::Macro(m) if m.mac.path.is_ident("conformance_cases") => {
-                if cases.is_some()
-                    || !m.attrs.is_empty()
-                    || m.ident.is_some()
-                    || m.semi_token.is_some()
-                {
-                    die("invalid cases macro")
-                };
-                let Cases(v) = syn::parse2(m.mac.tokens.clone()).unwrap_or_else(|e| die(e));
-                cases = Some(v)
-            }
-            _ => die("unhandled cases item"),
-        }
+    for item in &f.items {
+        let Item::Macro(macro_item) = item else {
+            die("only conformance_cases! is permitted")
+        };
+        if !macro_item.mac.path.is_ident("conformance_cases")
+            || cases.is_some()
+            || !macro_item.attrs.is_empty()
+            || macro_item.ident.is_some()
+            || macro_item.semi_token.is_some()
+        {
+            die("invalid cases macro")
+        };
+        let Cases(parsed) =
+            syn::parse2(macro_item.mac.tokens.clone()).unwrap_or_else(|error| die(error));
+        cases = Some(parsed);
     }
-    if abi.iter().map(|x| x.name.as_str()).collect::<Vec<_>>()
-        != [
-            "ConformanceZst8",
-            "ConformanceZst16",
-            "ConformanceZst32",
-            "ConformanceZstLayout",
-        ]
-    {
-        die("ABI declarations differ")
-    };
-    (abi, cases.unwrap_or_else(|| die("missing cases macro")))
+    cases.unwrap_or_else(|| die("missing cases macro"))
 }
 
 pub fn parse(corpus: &File, cases: &File) -> Model {
+    const CASE_IDS: [u32; 15] = [
+        1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1010, 1011, 1012, 1013, 1014, 1015, 1016,
+    ];
+
     let (schemas, roots) = parse_corpus(corpus);
-    let (abi_structs, cases) = parse_cases(cases);
-    if cases.len() != 11 || roots.len() != 11 {
-        die("exactly 11 cases and roots required")
-    };
-    let sn: BTreeSet<_> = schemas.iter().map(|x| x.name.clone()).collect();
-    for s in &schemas {
-        match &s.kind {
+    let cases = parse_cases(cases);
+    if cases.len() != CASE_IDS.len() || roots.len() != CASE_IDS.len() {
+        die("exactly fifteen registered conformance roots required")
+    }
+    let schemas_by_name: BTreeSet<_> = schemas.iter().map(|schema| schema.name.clone()).collect();
+    let schema_by_name: BTreeMap<_, _> = schemas
+        .iter()
+        .map(|schema| (schema.name.as_str(), schema))
+        .collect();
+    let registrations: BTreeMap<_, _> = roots
+        .iter()
+        .map(|root| (root.case_id, root.root_id.as_str()))
+        .collect();
+    if registrations.len() != roots.len() {
+        die("root registrations must have unique case IDs")
+    }
+
+    for schema in &schemas {
+        match &schema.kind {
             SchemaKind::Struct { fields } => {
-                for f in fields {
-                    if let Type::Schema(n) = &f.ty {
-                        if !sn.contains(n) {
-                            die(format!("unknown schema {n}"))
+                let mut external_tag_fields = BTreeSet::new();
+                for field in fields {
+                    let mut referenced_schemas = Vec::new();
+                    schema_refs(&field.ty, &mut referenced_schemas);
+                    for name in referenced_schemas {
+                        if !schemas_by_name.contains(name) {
+                            die(format!("unknown schema {name}"))
                         }
+                    }
+                    let Some(tag_field_name) = &field.tag_field else {
+                        if let Type::Schema(name) = &field.ty {
+                            if matches!(
+                                schema_by_name[name.as_str()].kind,
+                                SchemaKind::TaggedEnum { .. }
+                            ) {
+                                die("tagged payload field requires tag_field")
+                            }
+                        }
+                        continue;
+                    };
+                    if !external_tag_fields.insert(tag_field_name.as_str()) {
+                        die("each external union requires a unique sibling tag field")
+                    }
+                    let Type::Schema(payload_name) = &field.ty else {
+                        die("tag_field is only valid on a tagged payload")
+                    };
+                    let payload_schema = schema_by_name
+                        .get(payload_name.as_str())
+                        .unwrap_or_else(|| die("tagged payload schema is missing"));
+                    let SchemaKind::TaggedEnum { tag, .. } = &payload_schema.kind else {
+                        die("tag_field requires a tagged payload")
+                    };
+                    let sibling = fields
+                        .iter()
+                        .find(|candidate| candidate.name == *tag_field_name)
+                        .unwrap_or_else(|| die("tag_field sibling is missing"));
+                    let Type::Schema(sibling_name) = &sibling.ty else {
+                        die("tag_field sibling must be a scalar enum")
+                    };
+                    let sibling_schema = schema_by_name
+                        .get(sibling_name.as_str())
+                        .unwrap_or_else(|| die("tag_field sibling schema is missing"));
+                    if sibling_name != tag
+                        || !matches!(&sibling_schema.kind, SchemaKind::ScalarEnum { .. })
+                    {
+                        die("tag_field sibling must match the tagged payload scalar enum")
                     }
                 }
             }
             SchemaKind::TaggedEnum { tag, variants } => {
-                if !sn.contains(tag) {
-                    die("unknown tag schema")
-                };
-                for v in variants {
-                    if let Some(n) = &v.payload {
-                        if !sn.contains(n) {
-                            die("unknown payload schema")
+                if !matches!(
+                    schema_by_name.get(tag.as_str()).map(|schema| &schema.kind),
+                    Some(SchemaKind::ScalarEnum { .. })
+                ) {
+                    die("tagged payload tag must be a scalar enum")
+                }
+                for variant in variants {
+                    if let Some(payload) = &variant.payload {
+                        if !schemas_by_name.contains(payload) {
+                            die("unknown tagged variant payload")
                         }
                     }
                 }
             }
-            _ => {}
+            SchemaKind::ScalarEnum { .. } => {}
         }
     }
-    let mut edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for s in &schemas {
-        let mut e = Vec::new();
-        match &s.kind {
+
+    let mut edges = BTreeMap::<String, Vec<String>>::new();
+    for schema in &schemas {
+        let edges_for_schema = match &schema.kind {
             SchemaKind::Struct { fields } => {
-                for f in fields {
-                    if let Type::Schema(n) = &f.ty {
-                        e.push(n.clone())
-                    }
+                let mut references = Vec::new();
+                for field in fields {
+                    schema_refs(&field.ty, &mut references);
                 }
+                references.into_iter().map(str::to_owned).collect()
             }
-            SchemaKind::TaggedEnum { variants, .. } => {
-                for v in variants {
-                    if let Some(n) = &v.payload {
-                        e.push(n.clone())
-                    }
-                }
-            }
-            _ => {}
-        }
-        {
-            edges.insert(s.name.clone(), e);
-        }
+            SchemaKind::TaggedEnum { variants, .. } => variants
+                .iter()
+                .filter_map(|variant| variant.payload.clone())
+                .collect(),
+            SchemaKind::ScalarEnum { .. } => Vec::new(),
+        };
+        edges.insert(schema.name.clone(), edges_for_schema);
     }
     fn visit(
-        n: &str,
-        e: &BTreeMap<String, Vec<String>>,
-        temp: &mut BTreeSet<String>,
-        done: &mut BTreeSet<String>,
+        name: &str,
+        edges: &BTreeMap<String, Vec<String>>,
+        temporary: &mut BTreeSet<String>,
+        complete: &mut BTreeSet<String>,
     ) {
-        if done.contains(n) {
+        if complete.contains(name) {
             return;
         }
-        if !temp.insert(n.to_owned()) {
+        if !temporary.insert(name.to_owned()) {
             die("schema cycle")
-        };
-        for x in &e[n] {
-            visit(x, e, temp, done)
         }
-        temp.remove(n);
-        done.insert(n.to_owned());
+        for child in &edges[name] {
+            visit(child, edges, temporary, complete)
+        }
+        temporary.remove(name);
+        complete.insert(name.to_owned());
     }
-    let (mut t, mut d) = (BTreeSet::new(), BTreeSet::new());
-    for n in edges.keys() {
-        visit(n, &edges, &mut t, &mut d)
+    let (mut temporary, mut complete) = (BTreeSet::new(), BTreeSet::new());
+    for name in edges.keys() {
+        visit(name, &edges, &mut temporary, &mut complete)
     }
+    for schema in &schemas {
+        let SchemaKind::Struct { fields } = &schema.kind else {
+            continue;
+        };
+        for field in fields {
+            let Type::Option(inner) = &field.ty else {
+                continue;
+            };
+            if !option_type_is_zero_sentinel_eligible(inner, &schema_by_name) {
+                die("Option inner type must be a zero-invalid schema or schema array")
+            }
+        }
+    }
+
     let mut ids = BTreeSet::new();
     let mut keys = BTreeSet::new();
-    for (idx, c) in cases.iter().enumerate() {
-        if c.id != 1001 + idx as u32 || !ids.insert(c.id) {
-            die("case ids must be 1001..1011")
-        };
-        let r = &roots[idx];
-        if r.case_id != c.id || r.root_id != c.root_id {
-            die("root registry/case mismatch")
-        };
-        match &c.root {
-            Root::Schema(n) if sn.contains(n) => {}
-            Root::Abi(n) if abi_structs.iter().any(|x| &x.name == n) => {}
-            _ => die("case root unknown"),
-        };
-        for list in [
-            &c.layout.iter().map(|x| x.key).collect::<Vec<_>>(),
-            &c.observe.iter().map(|x| x.key).collect::<Vec<_>>(),
+    let mut used_roots = BTreeSet::new();
+    for case in &cases {
+        if !CASE_IDS.contains(&case.id) || !ids.insert(case.id) {
+            die("case IDs must be the frozen explicit set")
+        }
+        if case.native != (1012..=1016).contains(&case.id) {
+            die("only cases 1012 through 1016 may carry the native marker")
+        }
+        match registrations.get(&case.id) {
+            Some(root_id) if *root_id == case.root_id => {}
+            _ => die("root registry/case mismatch"),
+        }
+        let Root::Schema(root_name) = &case.root;
+        let root = schema_by_name
+            .get(root_name.as_str())
+            .unwrap_or_else(|| die("case root unknown"));
+        if matches!(&root.kind, SchemaKind::TaggedEnum { .. }) {
+            die("tagged payloads cannot be conformance roots")
+        }
+        used_roots.insert(root_name.clone());
+        for keys_for_case in [
+            case.layout
+                .iter()
+                .map(|entry| entry.key)
+                .collect::<Vec<_>>(),
+            case.observe
+                .iter()
+                .map(|entry| entry.key)
+                .collect::<Vec<_>>(),
         ] {
-            if list.is_empty() || list.windows(2).any(|w| w[0] >= w[1]) {
+            if keys_for_case.is_empty() || keys_for_case.windows(2).any(|pair| pair[0] >= pair[1]) {
                 die("keys must be nonempty ascending")
-            };
-            for k in list {
-                if *k == 0 || !keys.insert(*k) {
+            }
+            for key in keys_for_case {
+                if key == 0 || !keys.insert(key) {
                     die("keys must be globally unique nonzero")
                 }
             }
         }
-        let b = u64::from(c.id) * 1000;
-        if c.layout.iter().any(|x| x.key < b + 1 || x.key > b + 499)
-            || c.observe.iter().any(|x| x.key < b + 501 || x.key > b + 999)
+        let namespace = u64::from(case.id) * 1000;
+        if case
+            .layout
+            .iter()
+            .any(|entry| entry.key < namespace + 1 || entry.key > namespace + 499)
+            || case
+                .observe
+                .iter()
+                .any(|entry| entry.key < namespace + 501 || entry.key > namespace + 999)
         {
             die("key namespace/formula violation")
         }
     }
-    let used: BTreeSet<_> = cases
-        .iter()
-        .filter_map(|c| match &c.root {
-            Root::Schema(n) => Some(n.clone()),
-            _ => None,
-        })
-        .collect();
-    let mut reachable = used.clone();
+    if ids.len() != CASE_IDS.len() || !CASE_IDS.iter().all(|id| ids.contains(id)) {
+        die("all frozen case IDs must be present")
+    }
+
+    let mut reachable = used_roots;
     loop {
-        let old = reachable.len();
-        for n in reachable.clone() {
-            for x in &edges[&n] {
-                reachable.insert(x.clone());
+        let before = reachable.len();
+        for name in reachable.clone() {
+            for child in &edges[&name] {
+                reachable.insert(child.clone());
             }
         }
-        if reachable.len() == old {
+        if reachable.len() == before {
             break;
         }
     }
-    if schemas.iter().any(|s| !reachable.contains(&s.name)) {
+    if schemas
+        .iter()
+        .any(|schema| !reachable.contains(&schema.name))
+    {
         die("unused schema")
-    };
-    Model {
-        schemas,
-        abi_structs,
-        cases,
     }
+    Model { schemas, cases }
 }

@@ -19,6 +19,10 @@ set -eu
 case " $* " in
   *' metadata '*) exit 0 ;;
   *' fuzz run '*)
+    case " $* " in
+      *' -seed=424242 '*) ;;
+      *) echo 'missing stable libFuzzer seed' >&2; exit 97 ;;
+    esac
     corpus=$5
     case "${FAKE_CARGO_ACTION:-unchanged}" in
       unchanged) ;;

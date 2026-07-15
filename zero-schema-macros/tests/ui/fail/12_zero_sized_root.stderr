@@ -1,0 +1,5 @@
+error: schema structs must contain at least one field
+ --> tests/ui/fail/12_zero_sized_root.rs:4:8
+  |
+4 | struct EmptyRoot {}
+  |        ^^^^^^^^^

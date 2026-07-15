@@ -1,0 +1,62 @@
+error[E0599]: no function or associated item named `parse` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:10:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `parse` not found for this struct
+...
+10 |     let _ = LegacyApi::parse(&bytes);
+   |                        ^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `parse_prefix` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:11:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `parse_prefix` not found for this struct
+...
+11 |     let _ = LegacyApi::parse_prefix(&bytes);
+   |                        ^^^^^^^^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `encode` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:12:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `encode` not found for this struct
+...
+12 |     let _ = LegacyApi::encode(&LegacyApi { value: 1 });
+   |                        ^^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `encode_into` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:13:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `encode_into` not found for this struct
+...
+13 |     let _ = LegacyApi::encode_into(&LegacyApi { value: 1 }, &mut bytes);
+   |                        ^^^^^^^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `encoded_len` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:14:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `encoded_len` not found for this struct
+...
+14 |     let _ = LegacyApi::encoded_len();
+   |                        ^^^^^^^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `build` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:15:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `build` not found for this struct
+...
+15 |     let _ = LegacyApi::build();
+   |                        ^^^^^ function or associated item not found in `LegacyApi`
+
+error[E0599]: no function or associated item named `init` found for struct `LegacyApi` in the current scope
+  --> tests/ui/fail/03_removed_api.rs:16:24
+   |
+4  | struct LegacyApi {
+   | ---------------- function or associated item `init` not found for this struct
+...
+16 |     let _ = LegacyApi::init();
+   |                        ^^^^ function or associated item not found in `LegacyApi`

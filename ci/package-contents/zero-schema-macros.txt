@@ -1,0 +1,13 @@
+.cargo_vcs_info.json
+Cargo.lock
+Cargo.toml
+Cargo.toml.orig
+LICENSE
+src/analyze.rs
+src/emit_access.rs
+src/emit_mutation.rs
+src/emit_patch.rs
+src/emit_wire.rs
+src/errors.rs
+src/lib.rs
+src/parse.rs

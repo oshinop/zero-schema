@@ -1,0 +1,17 @@
+error[E0451]: field `input` of struct `OptionMut` is private
+  --> tests/ui/fail/55_option_mut_literal.rs:30:9
+   |
+30 |         input: fake(),
+   |         ^^^^^^^^^^^^^ private field
+
+error[E0451]: field `token` of struct `OptionMut` is private
+  --> tests/ui/fail/55_option_mut_literal.rs:31:9
+   |
+31 |         token: fake(),
+   |         ^^^^^^^^^^^^^ private field
+
+error[E0451]: field `_adapter` of struct `OptionMut` is private
+  --> tests/ui/fail/55_option_mut_literal.rs:32:9
+   |
+32 |         _adapter: core::marker::PhantomData,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private field

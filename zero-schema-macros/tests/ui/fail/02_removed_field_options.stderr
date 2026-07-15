@@ -1,0 +1,5 @@
+error: unknown field zero option `range`
+ --> tests/ui/fail/02_removed_field_options.rs:5:12
+  |
+5 |     #[zero(range = 1, must_equal = 1)]
+  |            ^^^^^

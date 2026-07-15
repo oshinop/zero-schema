@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - run: rustup toolchain install nightly-2025-11-15 --profile minimal
-      - run: cargo +nightly-2025-11-15 install --locked --version 0.13.2 cargo-fuzz
-      - run: cargo +nightly-2025-11-15 metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 >/dev/null
-      - run: cargo +nightly-2025-11-15 test --locked --manifest-path fuzz/Cargo.toml --lib
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal
+      - run: cargo +nightly-2026-07-02 install --locked --version 0.13.2 cargo-fuzz
+      - run: cargo +nightly-2026-07-02 metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 >/dev/null
+      - run: cargo +nightly-2026-07-02 test --locked --manifest-path fuzz/Cargo.toml --lib
       - name: Run fuzz target and record deterministic evidence
         env:
           TARGET: ${{ matrix.target }}
@@ -32,9 +32,9 @@ jobs:
           evidence="target/fuzz-evidence/${TARGET}-${GITHUB_SHA}.txt"
           {
             printf 'target=%s\nruns=10000\nlock_sha_before=%s\nlock_sha_after=%s\n' "$TARGET" "$before" "$after"
-            rustc +nightly-2025-11-15 -vV
-            cargo +nightly-2025-11-15 -V
-            cargo +nightly-2025-11-15 fuzz --version
+            rustc +nightly-2026-07-02 -vV
+            cargo +nightly-2026-07-02 -V
+            cargo +nightly-2026-07-02 fuzz --version
           } > "$evidence"
           test -s "$evidence"
       - name: Verify immutable corpora and clean artifacts

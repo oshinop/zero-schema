@@ -1,0 +1,5 @@
+error: unexpected end of input, expected identifier
+ --> tests/ui/fail/07_tag_field_missing_value.rs:5:23
+  |
+5 |     #[zero(tag_field =)]
+  |                       ^

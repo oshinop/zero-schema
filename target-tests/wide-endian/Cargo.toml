@@ -10,20 +10,31 @@ resolver = "3"
 
 [features]
 default = []
-explicit-little-u16str = []
-explicit-big-u16str = []
-inherited-little-u16str = []
-inherited-big-u16str = []
-native-over-little-u16str = []
-native-over-big-u16str = []
-explicit-little-u16cstr = []
-explicit-big-u16cstr = []
-inherited-little-u16cstr = []
-inherited-big-u16cstr = []
-native-over-little-u16cstr = []
-native-over-big-u16cstr = []
+u16str-prefix-native = []
+u16str-prefix-little = []
+u16str-prefix-big = []
+u16str-prefix-inherited-little = []
+u16str-prefix-inherited-big = []
+scalar-native = []
+scalar-little = []
+scalar-big = []
+u16cstr-native = []
+u16cstr-endian-native-reject = []
+u16cstr-endian-little-reject = []
+u16cstr-endian-big-reject = []
+positive-fixtures = [
+    "u16str-prefix-native",
+    "u16str-prefix-little",
+    "u16str-prefix-big",
+    "u16str-prefix-inherited-little",
+    "u16str-prefix-inherited-big",
+    "scalar-native",
+    "scalar-little",
+    "scalar-big",
+    "u16cstr-native",
+]
 
 [dependencies]
-zero-schema = { path = "../..", default-features = false, features = ["derive"] }
+zero-schema = { path = "../..", default-features = false }
 widestring = { version = "=1.2.1", default-features = false }
 zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }

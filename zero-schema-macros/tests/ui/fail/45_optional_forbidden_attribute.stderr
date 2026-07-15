@@ -1,0 +1,5 @@
+error: align is the only zero field option accepted by Option<T>
+ --> tests/ui/fail/45_optional_forbidden_attribute.rs:5:23
+  |
+5 |     #[zero(capacity = 4)]
+  |                       ^

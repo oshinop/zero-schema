@@ -1,0 +1,11 @@
+error: zero-sentinel Option fields require exactly one type argument: Option<T>
+ --> tests/ui/fail/48_optional_option_grammar.rs:9:11
+  |
+9 |     bare: Option,
+  |           ^^^^^^
+
+error: Option must be spelled Option<T>, core::option::Option<T>, or std::option::Option<T>
+  --> tests/ui/fail/48_optional_option_grammar.rs:14:23
+   |
+14 |     value: lookalike::Option<u8>,
+   |                       ^^^^^^

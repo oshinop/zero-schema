@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `access`
+ --> tests/ui/fail/05_generated_collision.rs:5:5
+  |
+5 |     access: u8,
+  |     ^^^^^^

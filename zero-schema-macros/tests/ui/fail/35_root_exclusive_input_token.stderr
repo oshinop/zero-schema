@@ -1,0 +1,17 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/35_root_exclusive_input_token.rs:12:60
+   |
+12 |     let _ = ExclusiveInput::<Wire>::from_exact(&mut bytes, ());
+   |             ----------------------------------             ^^ expected `__ZeroSchemaInputAccessToken`, found `()`
+   |             |
+   |             arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $WORKSPACE/src/access.rs
+   |
+   |     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
+   |            ^^^^^^^^^^
+help: try wrapping the expression in `__zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+12 |     let _ = ExclusiveInput::<Wire>::from_exact(&mut bytes, __zero_schema_support_publicroot_68f3781aafb1d646::__ZeroSchemaInputAccessToken { _private: () });
+   |                                                            +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    +

@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `tag`
+  --> tests/ui/fail/30_tagged_variant_fixed_collision.rs:17:5
+   |
+17 |     #[zero(tag = Tag::Value)]
+   |     ^

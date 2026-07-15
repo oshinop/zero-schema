@@ -1,183 +1,134 @@
-use core::fmt::{self, Write};
+#[path = "support/capabilities.rs"]
+#[allow(dead_code)]
+mod capabilities;
 #[path = "support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "support/optional.rs"]
+#[allow(dead_code)]
+mod optional;
+#[path = "support/producer.rs"]
+#[allow(dead_code)]
+mod producer;
+
+use core::fmt::{self, Write as _};
+
+use capabilities::{AllFeatures, AllFeaturesPatch};
 use counting_alloc::{assert_instrumentation_works, zero_allocations};
+use optional::{Child, ChildPatch, OptionalRoot, OptionalRootPatch, Required, optional_root_bytes};
 
-use zero_schema::{SchemaError, ValidationContext, ValidationFailure, ZeroSchema};
-
-fn reject(value: &u32, _: &ValidationContext<'_>) -> zero_schema::ValidationResult {
-    if *value == 99 {
-        Err(ValidationFailure::new(99, "rejected"))
-    } else {
-        Ok(())
-    }
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Direct {
-    valid: bool,
-    #[zero(validate_with = reject)]
-    value: u32,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct Nested {
-    prefix: u8,
-    direct: Direct,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[repr(u8)]
-enum Tag {
-    Empty = 1,
-    Direct = 2,
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(tag = Tag)]
-enum Payload {
-    #[zero(tag = Tag::Empty)]
-    Empty,
-    #[zero(tag = Tag::Direct)]
-    Direct(Direct),
-}
-
-#[derive(Debug, PartialEq, ZeroSchema)]
-struct External {
-    tag: Tag,
-    #[zero(tag_field = tag)]
-    payload: Payload,
-}
-
-struct StackText {
+struct FixedText {
     bytes: [u8; 256],
-    len: usize,
+    length: usize,
 }
-impl StackText {
+
+impl FixedText {
     const fn new() -> Self {
         Self {
             bytes: [0; 256],
-            len: 0,
+            length: 0,
         }
     }
 }
-impl Write for StackText {
+
+impl fmt::Write for FixedText {
     fn write_str(&mut self, value: &str) -> fmt::Result {
-        let end = self.len.checked_add(value.len()).ok_or(fmt::Error)?;
-        self.bytes
-            .get_mut(self.len..end)
-            .ok_or(fmt::Error)?
-            .copy_from_slice(value.as_bytes());
-        self.len = end;
+        let end = self.length.checked_add(value.len()).ok_or(fmt::Error)?;
+        let destination = self.bytes.get_mut(self.length..end).ok_or(fmt::Error)?;
+        destination.copy_from_slice(value.as_bytes());
+        self.length = end;
         Ok(())
     }
 }
 
 #[test]
-fn generated_paths_are_allocation_free() {
-    // Prove the instrument is live before relying on zero counts. Setup and destruction are
-    // deliberately outside every measured protocol operation.
+fn access_reads_copies_arrays_unions_patches_and_error_formatting_allocate_nothing() {
     assert_instrumentation_works();
+    let source = producer::all_features_mut();
+    let mut destination = producer::all_features_mut();
+    let mut invalid = producer::all_features_mut();
+    invalid.as_bytes_mut()[producer::all_features_offsets::ACTIVE] = 2;
 
-    let direct = Direct {
-        valid: true,
-        value: 7,
-    };
-    let nested = Nested {
-        prefix: 3,
-        direct: Direct {
-            valid: true,
-            value: 8,
-        },
-    };
-    let payload = Payload::Direct(Direct {
-        valid: true,
-        value: 9,
-    });
-    let external = External {
-        tag: Tag::Direct,
-        payload: Payload::Direct(Direct {
-            valid: true,
-            value: 10,
-        }),
-    };
-    let mut direct_bytes = zero_schema::make_buffer_for!(Direct);
-    let mut nested_bytes = zero_schema::make_buffer_for!(Nested);
-    let mut payload_bytes = zero_schema::make_buffer_for!(Payload);
-    let mut external_bytes = zero_schema::make_buffer_for!(External);
-
-    zero_allocations(|| direct.encode_into(direct_bytes.as_bytes_mut()).unwrap());
-    zero_allocations(|| nested.encode_into(nested_bytes.as_bytes_mut()).unwrap());
-    zero_allocations(|| payload.encode_into(payload_bytes.as_bytes_mut()).unwrap());
-    zero_allocations(|| external.encode_into(external_bytes.as_bytes_mut()).unwrap());
-    zero_allocations(|| assert_eq!(Direct::parse(direct_bytes.as_bytes()).unwrap(), direct));
-    zero_allocations(|| assert_eq!(Nested::parse(nested_bytes.as_bytes()).unwrap(), nested));
-    zero_allocations(|| assert_eq!(Payload::parse(payload_bytes.as_bytes()).unwrap(), payload));
     zero_allocations(|| {
+        let view = AllFeatures::access(source.as_bytes()).unwrap();
+        let logical = view.copy_into();
+        assert_eq!(view.samples().copy_into(), logical.samples);
+        assert_eq!(view.config().copy_into(), logical.config);
+        AllFeatures::access_mut(destination.as_bytes_mut())
+            .unwrap()
+            .copy_from(&AllFeaturesPatch::from(logical))
+            .unwrap();
         assert_eq!(
-            External::parse(external_bytes.as_bytes()).unwrap(),
-            external
-        )
+            AllFeatures::access(destination.as_bytes()).unwrap().name(),
+            "api"
+        );
+
+        let error = AllFeatures::access(invalid.as_bytes()).unwrap_err();
+        let mut text = FixedText::new();
+        write!(&mut text, "{error}").unwrap();
+        assert!(text.length > 0);
     });
+}
 
-    let encode_error = zero_allocations(|| {
-        Direct {
-            valid: true,
-            value: 99,
-        }
-        .encode_into(direct_bytes.as_bytes_mut())
-        .unwrap_err()
-    });
-    let mismatch_error = zero_allocations(|| {
-        External {
-            tag: Tag::Empty,
-            payload: Payload::Direct(Direct {
-                valid: true,
-                value: 1,
-            }),
-        }
-        .encode_into(external_bytes.as_bytes_mut())
-        .unwrap_err()
-    });
-
-    let bool_offset = Nested::LAYOUT.fields()[1].offset() + Direct::LAYOUT.fields()[0].offset();
-    nested_bytes.as_bytes_mut()[bool_offset] = 2;
-    let nested_error = zero_allocations(|| Nested::parse(nested_bytes.as_bytes()).unwrap_err());
-
-    let tag_offset = External::LAYOUT.fields()[0].offset();
-    external_bytes.as_bytes_mut()[tag_offset] = 0xff;
-    let tag_error = zero_allocations(|| External::parse(external_bytes.as_bytes()).unwrap_err());
-
-    let mut output = StackText::new();
+#[test]
+fn zero_sentinel_public_operations_allocate_nothing() {
+    let mut bytes = optional_root_bytes();
     zero_allocations(|| {
-        for error in [
-            &encode_error as &dyn SchemaError,
-            &mismatch_error,
-            &nested_error,
-            &tag_error,
+        {
+            let mut root =
+                OptionalRoot::access_mut(&mut bytes).expect("absent optionals are valid");
+            let mut child = root.maybe_child_mut();
+            child
+                .set(Some(Child {
+                    required: Required::One,
+                    payload: 23,
+                }))
+                .expect("initialize optional child");
+            {
+                let mut nested = child.get_mut().expect("child is present");
+                nested.payload_mut().set(41).expect("nested mutation");
+            }
+            assert_eq!(child.get().expect("live child").payload(), 41);
+        }
+        for (payload, required) in [
+            (41, Required::Two),
+            (43, Required::One),
+            (47, Required::Two),
+            (53, Required::One),
         ] {
-            let mut cursor = Some(error);
-            while let Some(node) = cursor {
-                let _ = (
-                    node.kind(),
-                    node.schema(),
-                    node.segment(),
-                    node.validation_code(),
-                );
-                let source = core::error::Error::source(node);
-                if let Some(child) = node.child() {
-                    assert!(source.is_some());
-                    cursor = Some(child);
-                } else {
-                    cursor = None;
-                }
+            {
+                let mut root =
+                    OptionalRoot::access_mut(&mut bytes).expect("present child is valid");
+                root.maybe_child_mut()
+                    .get_mut()
+                    .expect("child remains present")
+                    .payload_mut()
+                    .set(payload)
+                    .expect("repeated OptionMut nested mutation");
             }
-            let mut source_cursor = core::error::Error::source(error);
-            while let Some(source) = source_cursor {
-                source_cursor = source.source();
-            }
-            write!(&mut output, "{error}").unwrap();
+            OptionalRoot::access_mut(&mut bytes)
+                .expect("present child is valid")
+                .copy_from(&OptionalRootPatch {
+                    maybe_child: Some(Some(ChildPatch {
+                        required: Some(required.into()),
+                        payload: None,
+                    })),
+                    ..Default::default()
+                })
+                .expect("repeated present partial optional patch");
+            let view = OptionalRoot::access(&bytes).expect("patched bytes are valid");
+            assert_eq!(
+                view.maybe_child()
+                    .expect("child remains present")
+                    .required(),
+                required
+            );
+            assert_eq!(
+                view.copy_into()
+                    .maybe_child
+                    .expect("materialized child")
+                    .payload,
+                payload
+            );
         }
     });
-    assert!(output.len > 0);
 }

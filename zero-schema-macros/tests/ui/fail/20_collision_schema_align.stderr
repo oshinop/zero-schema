@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `SCHEMA_ALIGN`
+ --> tests/ui/fail/20_collision_schema_align.rs:5:5
+  |
+5 |     SCHEMA_ALIGN: u8,
+  |     ^^^^^^^^^^^^

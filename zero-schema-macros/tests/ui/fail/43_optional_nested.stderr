@@ -1,0 +1,5 @@
+error: nested Option<Option<T>> is unsupported; the all-zero sentinel represents one absence state
+ --> tests/ui/fail/43_optional_nested.rs:5:19
+  |
+5 |     value: Option<Option<Missing>>,
+  |                   ^^^^^^

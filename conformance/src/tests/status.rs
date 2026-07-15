@@ -1,8 +1,16 @@
-use crate::ffi::{ProbePointer, probe_inspect, probe_layout, probe_write};
+use crate::ffi::{ProbePointer, cpp_write_fixture, probe_inspect, probe_layout, probe_write};
 use crate::inventory::CASES;
 use crate::report::{FfiError, Status};
 
 const ID: u32 = 1001;
+
+fn producer_input() -> Vec<u8> {
+    let case = CASES
+        .iter()
+        .find(|case| case.case_id == ID)
+        .expect("case 1001");
+    cpp_write_fixture(ID, (case.schema_size)()).expect("C++ producer")
+}
 
 fn assert_failed<T: Eq + core::fmt::Debug>(
     raw: u8,
@@ -87,7 +95,7 @@ fn layout_precedence_capacity_null_and_alignment() {
 
 #[test]
 fn write_capacity_boundaries_and_sentinels() {
-    let required = (CASES[0].rust_bytes)().unwrap().len();
+    let required = (CASES[0].schema_size)();
     let short = probe_write(ID, required - 1, ProbePointer::Valid, ProbePointer::Null);
     assert_failed(
         short.raw_status,
@@ -114,7 +122,7 @@ fn write_capacity_boundaries_and_sentinels() {
 
 #[test]
 fn inspect_simultaneous_fault_precedence_and_immutability() {
-    let input = (CASES[0].rust_bytes)().unwrap();
+    let input = producer_input();
     let original = input.clone();
     let unknown = probe_inspect(
         u32::MAX,
@@ -211,7 +219,7 @@ fn inspect_simultaneous_fault_precedence_and_immutability() {
 
 #[test]
 fn inspect_exact_and_excess_capacity_write_only_required_slots() {
-    let input = (CASES[0].rust_bytes)().unwrap();
+    let input = producer_input();
     let pairs = crate::BUILD_CASES[0].observation_keys.len();
     let required = 3 + 2 * pairs;
     for capacity in [required, required + 5] {
@@ -237,7 +245,7 @@ fn inspect_exact_and_excess_capacity_write_only_required_slots() {
 
 #[test]
 fn write_fault_precedence_and_written_reset_matrix() {
-    let required = (CASES[0].rust_bytes)().unwrap().len();
+    let required = (CASES[0].schema_size)();
     for written in [ProbePointer::Null, ProbePointer::Misaligned] {
         let result = probe_write(u32::MAX, 0, written, ProbePointer::Null);
         assert_eq!(result.raw_status, Status::NullWritten as u8);

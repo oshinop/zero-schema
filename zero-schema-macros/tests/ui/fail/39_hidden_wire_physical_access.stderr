@@ -1,0 +1,30 @@
+error[E0616]: field `value` of struct `PublicRootWire` is private
+  --> tests/ui/fail/39_hidden_wire_physical_access.rs:16:26
+   |
+16 |     let _physical = wire.value;
+   |                          ^^^^^ private field
+
+error[E0277]: the trait bound `PublicRootWire: IntoBytes` is not satisfied
+  --> tests/ui/fail/39_hidden_wire_physical_access.rs:17:24
+   |
+17 |     require_into_bytes(wire);
+   |     ------------------ ^^^^ the trait `IntoBytes` is not implemented for `PublicRootWire`
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = note: Consider adding `#[derive(IntoBytes)]` to `PublicRootWire`
+   = help: the following other types implement trait `IntoBytes`:
+             ()
+             AtomicBool
+             AtomicI16
+             AtomicI32
+             AtomicI64
+             AtomicI8
+             AtomicIsize
+             AtomicU16
+           and $N others
+note: required by a bound in `require_into_bytes`
+  --> tests/ui/fail/39_hidden_wire_physical_access.rs:10:26
+   |
+10 | fn require_into_bytes<T: IntoBytes>(_: &T) {}
+   |                          ^^^^^^^^^ required by this bound in `require_into_bytes`

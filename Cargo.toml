@@ -13,7 +13,7 @@ include = ["src/**", "examples/**", "benches/**", "Cargo.toml", "README.md", "TE
 resolver = "3"
 members = [
     ".",
-    "zero-schema-derive",
+    "zero-schema-macros",
     "conformance",
     "no-std-smoke",
     "test-fixtures/schema-corpus",
@@ -23,13 +23,12 @@ members = [
 exclude = ["fuzz", "target-tests/wide-endian"]
 
 [features]
-default = ["std", "derive"]
-derive = ["dep:zero-schema-derive"]
+default = ["std"]
 alloc = ["zerocopy/alloc"]
 std = ["alloc", "zerocopy/std"]
 
 [dependencies]
-zero-schema-derive = { path = "zero-schema-derive", version = "=0.1.0", optional = true }
+zero-schema-macros = { path = "zero-schema-macros", version = "=0.1.0" }
 zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
 widestring = { version = "=1.2.1", default-features = false }
 
@@ -43,23 +42,25 @@ sha2 = "=0.11.0"
 
 [[example]]
 name = "records"
-required-features = ["derive"]
 
 [[example]]
 name = "tagged"
-required-features = ["derive"]
 
 [[example]]
-name = "validation_errors"
-required-features = ["derive", "alloc"]
+name = "access_errors"
+required-features = ["alloc"]
 
 [[example]]
-name = "generic_buffer"
-required-features = ["derive"]
+name = "generic_receiving_buffer"
 
 [[example]]
 name = "no_std_wasm"
-required-features = ["derive"]
+
+[[example]]
+name = "optional"
+
+[[example]]
+name = "strings"
 
 [[bench]]
 name = "codec"

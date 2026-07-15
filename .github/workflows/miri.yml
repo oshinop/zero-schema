@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - run: rustup toolchain install nightly-2025-11-15 --profile minimal --component miri
-      - run: rustc +nightly-2025-11-15 -vV && cargo +nightly-2025-11-15 -V
-      - run: cargo +nightly-2025-11-15 miri test --locked -p zero-schema --test miri --all-features
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component miri
+      - run: rustc +nightly-2026-07-02 -vV && cargo +nightly-2026-07-02 -V
+      - run: cargo +nightly-2026-07-02 miri test --locked --manifest-path tests/miri-harness/Cargo.toml --test miri
   gate:
     if: always()
     needs: [miri]

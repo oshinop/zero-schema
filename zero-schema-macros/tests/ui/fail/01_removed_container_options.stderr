@@ -1,0 +1,5 @@
+error: unknown container zero option `padding`
+ --> tests/ui/fail/01_removed_container_options.rs:3:8
+  |
+3 | #[zero(padding = "zero", tail = "zero", validate_with = validate)]
+  |        ^^^^^^^

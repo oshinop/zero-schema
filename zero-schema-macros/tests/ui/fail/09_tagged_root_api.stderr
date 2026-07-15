@@ -1,0 +1,26 @@
+error[E0599]: no variant or associated item named `access` found for enum `Payload` in the current scope
+  --> tests/ui/fail/09_tagged_root_api.rs:17:22
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `access` not found for this enum
+...
+17 |     let _ = Payload::access(&[0_u8]);
+   |                      ^^^^^^ variant or associated item not found in `Payload`
+
+error[E0599]: no variant or associated item named `access_mut` found for enum `Payload` in the current scope
+  --> tests/ui/fail/09_tagged_root_api.rs:18:22
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `access_mut` not found for this enum
+...
+18 |     let _ = Payload::access_mut(&mut [0_u8]);
+   |                      ^^^^^^^^^^ variant or associated item not found in `Payload`
+
+error[E0599]: no variant or associated item named `SCHEMA_SIZE` found for enum `Payload` in the current scope
+  --> tests/ui/fail/09_tagged_root_api.rs:19:22
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `SCHEMA_SIZE` not found for this enum
+...
+19 |     let _ = Payload::SCHEMA_SIZE;
+   |                      ^^^^^^^^^^^ variant or associated item not found in `Payload`

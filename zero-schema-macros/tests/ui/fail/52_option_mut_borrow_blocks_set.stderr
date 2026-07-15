@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `maybe` as mutable more than once at a time
+  --> tests/ui/fail/52_option_mut_borrow_blocks_set.rs:32:5
+   |
+31 |     let child = maybe.get_mut().expect("present child");
+   |                 ----- first mutable borrow occurs here
+32 |     maybe.set(None).expect("must not overlap the child borrow");
+   |     ^^^^^ second mutable borrow occurs here
+33 |     assert_eq!(child.state(), State::First);
+   |                ----- first borrow later used here

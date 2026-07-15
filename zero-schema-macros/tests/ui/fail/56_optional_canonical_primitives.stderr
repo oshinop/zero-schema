@@ -1,0 +1,5 @@
+error: Option<T> cannot use a primitive or bool T because the all-zero wire is valid
+ --> tests/ui/fail/56_optional_canonical_primitives.rs:5:23
+  |
+5 |     core_bool: Option<::core::primitive::bool>,
+  |                       ^

@@ -1,0 +1,17 @@
+error[E0271]: type mismatch resolving `<ZeroValidRecord as WireTypeSupport>::ZeroState == ZeroInvalid`
+ --> tests/ui/fail/69_optional_zero_valid_record_array.rs:8:1
+  |
+8 | #[zero]
+  | ^^^^^^^ expected `ZeroInvalid`, found `ZeroValid`
+  |
+  = help: see issue #48214
+  = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<ZeroValidRecord as WireTypeSupport>::ZeroState == ZeroInvalid`
+ --> tests/ui/fail/69_optional_zero_valid_record_array.rs:8:1
+  |
+8 | #[zero]
+  | ^^^^^^^ expected `ZeroInvalid`, found `ZeroValid`
+  |
+  = help: see issue #48214
+  = note: this error originates in the derive macro `Debug` (in Nightly builds, run with -Z macro-backtrace for more info)

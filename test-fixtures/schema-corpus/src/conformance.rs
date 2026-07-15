@@ -1,9 +1,10 @@
 use core::ffi::CStr;
 use widestring::{U16CStr, U16Str};
-use zero_schema::ZeroSchema;
+use zero_schema::zero;
 
 /// Canonical fixed-layout root mirrored by the unpublished C++ harness.
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceScalars {
     pub marker: u8,
     #[zero(endian = "little")]
@@ -12,7 +13,8 @@ pub struct ConformanceScalars {
     pub big32: u32,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceAligned {
     pub prefix: u8,
     #[zero(align = 8)]
@@ -20,20 +22,22 @@ pub struct ConformanceAligned {
     pub suffix: u8,
 }
 
-#[derive(Debug, PartialEq, Eq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum ConformanceTag {
     Empty = 10,
     Data = 11,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceData {
     pub bits: u32,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(tag = ConformanceTag, tail = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub enum ConformanceMessage {
     #[zero(tag = ConformanceTag::Empty)]
     Empty,
@@ -41,8 +45,17 @@ pub enum ConformanceMessage {
     Data(ConformanceData),
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+/// Minimal external record used as the root for conformance cases 1003/1004.
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ConformanceMessageRecord {
+    pub tag: ConformanceTag,
+    #[zero(tag_field = tag)]
+    pub payload: ConformanceMessage,
+}
+
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformancePrimitives {
     pub u8_value: u8,
     pub i8_bits: i8,
@@ -97,51 +110,58 @@ pub struct ConformancePrimitives {
     pub f64_big: f64,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 #[allow(non_camel_case_types)]
 pub enum ConformanceEnum8 {
     r#type = 0xa5,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
 #[zero(endian = "native")]
 pub enum ConformanceEnumNative16 {
     Value = 0x1122,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
 #[zero(endian = "little")]
 pub enum ConformanceEnumLittle16 {
     Value = 0x0102,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
 #[zero(endian = "big")]
 pub enum ConformanceEnumBig16 {
     Value = 0x0102,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 #[zero(endian = "native")]
 pub enum ConformanceEnumNative32 {
     Value = 0x1122_3344,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 #[zero(endian = "little")]
 pub enum ConformanceEnumLittle32 {
     Value = 0x0102_0304,
 }
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 #[zero(endian = "big")]
 pub enum ConformanceEnumBig32 {
     Value = 0x0102_0304,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceEnums {
     pub enum8: ConformanceEnum8,
     pub native16: ConformanceEnumNative16,
@@ -152,47 +172,48 @@ pub struct ConformanceEnums {
     pub big32: ConformanceEnumBig32,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceStrings<'a> {
-    #[zero(capacity = 3, len_type = u8, tail = "zero")]
+    #[zero(capacity = 3, len_type = u8)]
     pub utf8_u8: &'a str,
-    #[zero(capacity = 3, len_type = u16, endian = "native", tail = "zero")]
+    #[zero(capacity = 3, len_type = u16, endian = "native")]
     pub utf8_u16_native: &'a str,
-    #[zero(capacity = 3, len_type = u16, endian = "little", tail = "zero")]
+    #[zero(capacity = 3, len_type = u16, endian = "little")]
     pub utf8_u16_little: &'a str,
-    #[zero(capacity = 3, len_type = u16, endian = "big", tail = "zero")]
+    #[zero(capacity = 3, len_type = u16, endian = "big")]
     pub utf8_u16_big: &'a str,
-    #[zero(capacity = 1, len_type = u32, endian = "native", tail = "zero")]
+    #[zero(capacity = 1, len_type = u32, endian = "native")]
     pub utf8_u32_native: &'a str,
-    #[zero(capacity = 1, len_type = u32, endian = "little", tail = "zero")]
+    #[zero(capacity = 1, len_type = u32, endian = "little")]
     pub utf8_u32_little: &'a str,
-    #[zero(capacity = 1, len_type = u32, endian = "big", tail = "zero")]
+    #[zero(capacity = 1, len_type = u32, endian = "big")]
     pub utf8_u32_big: &'a str,
-    #[zero(capacity = 4, tail = "zero")]
+    #[zero(capacity = 4)]
     pub c_bytes: &'a CStr,
-    #[zero(capacity = 1, len_type = u8, endian = "native", tail = "zero")]
+    #[zero(capacity = 1, len_type = u8, endian = "native")]
     pub u16_u8: &'a U16Str,
-    #[zero(capacity = 3, len_type = u16, endian = "native", tail = "zero")]
+    #[zero(capacity = 3, len_type = u16, endian = "native")]
     pub u16_u16: &'a U16Str,
-    #[zero(capacity = 1, len_type = u32, endian = "native", tail = "zero")]
+    #[zero(capacity = 1, len_type = u32, endian = "native")]
     pub u16_u32: &'a U16Str,
-    #[zero(capacity = 3, endian = "native", tail = "zero")]
+    #[zero(capacity = 3)]
     pub u16_c: &'a U16CStr,
     pub fixed: &'a [u8; 5],
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceNested {
     pub prefix: u8,
     pub child: ConformanceScalars,
+    pub samples: [u16; 3],
     #[zero(endian = "big")]
     pub suffix: u16,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceExternalMessage {
     pub prefix: u8,
     pub tag: ConformanceTag,
@@ -202,15 +223,16 @@ pub struct ConformanceExternalMessage {
     pub suffix: u16,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum ConformanceUnitTag {
     A = 21,
     B = 22,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(tag = ConformanceUnitTag, tail = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub enum ConformanceUnits {
     #[zero(tag = ConformanceUnitTag::A)]
     A,
@@ -218,8 +240,8 @@ pub enum ConformanceUnits {
     B,
 }
 
-#[derive(Debug, PartialEq, ZeroSchema)]
-#[zero(padding = "zero")]
+#[zero]
+#[derive(Debug, PartialEq)]
 pub struct ConformanceExternalUnits {
     pub prefix: u8,
     pub tag: ConformanceUnitTag,
@@ -227,6 +249,33 @@ pub struct ConformanceExternalUnits {
     pub payload: ConformanceUnits,
     #[zero(endian = "little")]
     pub suffix: u16,
+}
+
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ConformanceOptionKind {
+    One = 1,
+    Two = 2,
+}
+
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ConformanceOptionChild {
+    pub first: ConformanceOptionKind,
+    #[zero(align = 4)]
+    pub second: ConformanceOptionKind,
+}
+
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ConformanceOptions {
+    pub prefix: u8,
+    #[zero(align = 8)]
+    pub maybe_kind: Option<ConformanceOptionKind>,
+    pub maybe_child: core::option::Option<ConformanceOptionChild>,
+    pub maybe_array: core::option::Option<[ConformanceOptionKind; 2]>,
+    pub suffix: u8,
 }
 
 pub const CONFORMANCE_ROOT_IDS: &[(&str, u32)] = &[
@@ -238,7 +287,11 @@ pub const CONFORMANCE_ROOT_IDS: &[(&str, u32)] = &[
     ("conformance-enums", 1006),
     ("conformance-strings", 1007),
     ("conformance-nested", 1008),
-    ("conformance-zst-layout", 1009),
     ("conformance-external-message", 1010),
     ("conformance-external-units", 1011),
+    ("conformance-options-none", 1012),
+    ("conformance-options-kind", 1013),
+    ("conformance-options-child", 1014),
+    ("conformance-options-array", 1015),
+    ("conformance-options-all", 1016),
 ];

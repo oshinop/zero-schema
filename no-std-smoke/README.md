@@ -1,31 +1,45 @@
 # `no_std` smoke package
 
-This unpublished workspace package verifies that generated `zero-schema` code remains usable by a real `#![no_std]` consumer. It is separate from the runtime crate even though the runtime itself is `no_std` because ordinary unit and integration tests are not sufficient evidence:
+This unpublished workspace package proves that a real `#![no_std]` consumer can use
+the producer-byte capability API without feature unification from the root test
+harness. It remains separate from the runtime crate because ordinary tests link
+`std`, and a broad workspace graph can otherwise enable the runtime's standard
+features indirectly.
 
-- Rust's test harness links `std`, so a test can compile despite accidental standard-library use.
-- Cargo feature unification can enable `zero-schema/std` through another workspace dependency, especially in `--all-features` test runs.
-- Cross-compiling exposes dependencies or generated code that only work on the host target.
-- Compiling a library does not prove that a complete freestanding executable can link without a host runtime.
+The package has `publish = false`, shares the workspace lockfile, and depends on:
 
-The package is `publish = false`, shares the workspace lockfile, and has no feature forwarding of its own. Its manifest depends on:
+- `zero-schema` with `default-features = false`;
+- direct `zerocopy` with default features disabled and its macro support, as required
+  by generated private wire forms.
 
-- `zero-schema` with `default-features = false` and only `features = ["derive"]`;
-- `widestring` with default features disabled, for borrowed UTF-16 schema fields;
-- `zerocopy` with default features disabled and only its derive support, as required by generated derives.
+`#[zero]` is re-exported unconditionally, so it remains available while the smoke
+package keeps both `std` and `alloc` disabled.
 
-## Smoke code
+## Smoke behavior
 
-`src/lib.rs` is unconditionally `#![no_std]`. It derives and exercises:
+`src/lib.rs` is unconditionally `#![no_std]`. It declares:
 
-- a scalar tag enum;
-- borrowed UTF-8, C string, UTF-16, UTF-16 C string, and fixed-byte fields;
-- a nested record;
-- unit and data variants of an internally tagged union;
-- owned `AlignedBytes`, `make_buffer_for!`, encoding, exact parse, and prefix parse.
+- the closed scalar enum `SmokeKind`;
+- a nested `Number` record;
+- the logical `Payload` tagged declaration; and
+- the root `Packet`, where `kind` is the payload's mandatory external tag.
 
-`smoke_roundtrip()` returns `0` after encoding and parsing the borrowed record and nested tagged payload; nonzero values identify a failed stage. `smoke_prefix()` returns `0` when prefix parsing consumes exactly `Packet::WIRE_SIZE` and leaves the three trailing bytes intact.
+The reviewed `Packet` bytes live in an explicitly aligned fixture wrapper. The smoke
+function calls exact `Packet::access`, reads the scalar tag and selected `Data`
+payload, materializes with `copy_into`, then calls `access_mut` and changes only the
+selected nested number through a short field-local reborrow. It performs a fresh
+access to prove the successful constrained update remains type-valid.
 
-`src/bin/linked-wasm.rs` becomes `no_std` and `no_main` only on `wasm32` with `target_os = "none"`. For that target it supplies a panic handler and exports `_start`, which calls both smoke functions. On host targets it has an empty `main` so normal workspace target discovery still succeeds.
+The source does not construct a schema representation from a logical Rust value. Its
+constant is a reviewed producer fixture copied into initialized, correctly aligned
+Rust test storage. The same application rule applies at a real boundary: the producer
+initializes the exact slot, then the consumer asks `access` whether those bytes are
+valid for `Packet`.
+
+`src/bin/linked-wasm.rs` is `no_std` and `no_main` only for `wasm32` with
+`target_os = "none"`. On that target it supplies a panic handler and exports `_start`,
+which invokes the smoke function. On other targets it has an empty `main` solely so
+Cargo can discover the target.
 
 ## Reproduce the target proofs
 
@@ -39,8 +53,13 @@ cargo +1.85.0 check --locked -p zero-schema-no-std-smoke --lib --target thumbv7e
 cargo +1.85.0 build --locked -p zero-schema-no-std-smoke --bin linked-wasm --target wasm32v1-none --release
 ```
 
-The Thumb command is a **compile proof**: the `#![no_std]` library, generated schemas, and core-compatible dependencies type-check for an embedded target. It does not link a Thumb executable.
+The Thumb command is a **compile proof**: the core-only runtime, `#[zero]` expansion,
+and producer-byte capability usage type-check for an embedded target. It does not
+link a Thumb executable.
 
-The wasm command is a **link proof**: the freestanding binary, panic handler, `_start` entry point, generated code, and dependencies produce a final optimized `wasm32v1-none` artifact without a standard host runtime.
-
-Neither command is a **runtime execution proof**. The artifacts are not run, `_start` discards the smoke return codes, and target runtime behavior is therefore not observed. These target checks cover the runtime's core configuration plus `derive`; they do not separately prove core without derive, `alloc`, or `std` feature modes. The wasm build is the only complete freestanding executable link in this package.
+The wasm command is a **link proof**: the freestanding binary, panic handler, `_start`
+entry point, generated schemas, and dependencies produce a final optimized
+`wasm32v1-none` artifact without a host runtime. Neither command executes target code;
+`_start` discards the smoke return value. Together they do not replace the separate
+host behavior, Miri, ABI, or fuzz verification layers described in
+[`TESTING.md`](../TESTING.md).

@@ -6,5 +6,5 @@ rust-version = "1.85"
 publish = false
 
 [dependencies]
-zero-schema = { path = "../..", default-features = false, features = ["derive"] }
+zero-schema = { path = "../..", default-features = false }
 zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }

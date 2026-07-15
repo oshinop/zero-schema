@@ -1,0 +1,51 @@
+error[E0599]: no variant or associated item named `SCHEMA_SIZE` found for enum `Payload` in the current scope
+  --> tests/ui/fail/10_tagged_root_buffer.rs:17:13
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `SCHEMA_SIZE` not found for this enum
+...
+17 |     let _ = zs::schema_buffer!(Payload);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `Payload`
+   |
+   = note: this error originates in the macro `zs::schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Payload: WireType` is not satisfied
+  --> tests/ui/fail/10_tagged_root_buffer.rs:17:32
+   |
+17 |     let _ = zs::schema_buffer!(Payload);
+   |                                ^^^^^^^ the trait `WireType` is not implemented for `Payload`
+   |
+   = help: the trait `WireType` is implemented for `Kind`
+
+error[E0599]: no variant or associated item named `SCHEMA_ALIGN` found for enum `Payload` in the current scope
+  --> tests/ui/fail/10_tagged_root_buffer.rs:17:13
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `SCHEMA_ALIGN` not found for this enum
+...
+17 |     let _ = zs::schema_buffer!(Payload);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `Payload`
+   |
+   = note: this error originates in the macro `zs::schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no variant or associated item named `SCHEMA_STRIDE` found for enum `Payload` in the current scope
+  --> tests/ui/fail/10_tagged_root_buffer.rs:17:13
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `SCHEMA_STRIDE` not found for this enum
+...
+17 |     let _ = zs::schema_buffer!(Payload);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `Payload`
+   |
+   = note: this error originates in the macro `zs::schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no variant or associated item named `SCHEMA_SIZE` found for enum `Payload` in the current scope
+  --> tests/ui/fail/10_tagged_root_buffer.rs:17:13
+   |
+11 | enum Payload {
+   | ------------ variant or associated item `SCHEMA_SIZE` not found for this enum
+...
+17 |     let _ = zs::schema_buffer!(Payload);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `Payload`
+   |
+   = note: this error originates in the macro `zs::schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)

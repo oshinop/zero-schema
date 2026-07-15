@@ -40,16 +40,17 @@ pub enum ErrorKind {
     InvalidBool,
     UnknownEnumValue,
     LengthOutOfBounds,
+    LengthUnrepresentable,
     InvalidUtf8,
     MissingNul,
-    NonZeroTail,
-    NonZeroPadding,
     UnknownUnionTag,
     CapacityExceeded,
+    ArrayIndexOutOfBounds,
+    ArrayLengthMismatch,
     TagMismatch,
-    RangeViolation,
-    MustEqualViolation,
-    CustomValidation,
+    TagOnlyPatch,
+    IncompleteUnionSwitch,
+    IncompleteOptionalInitialization,
 }
 
 /// One component of a structured schema error path.
@@ -57,6 +58,7 @@ pub enum ErrorKind {
 #[non_exhaustive]
 pub enum ErrorPathSegment {
     Field(&'static str),
+    Index(usize),
     Variant(&'static str),
 }
 
@@ -66,9 +68,6 @@ pub trait SchemaError: core::error::Error + 'static {
     fn schema(&self) -> &'static str;
     fn segment(&self) -> Option<ErrorPathSegment>;
     fn child(&self) -> Option<&dyn SchemaError>;
-    fn validation_code(&self) -> Option<u32> {
-        None
-    }
 
     #[doc(hidden)]
     fn __fmt_leaf(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
@@ -82,11 +81,13 @@ pub fn __fmt_schema_error(error: &dyn SchemaError, f: &mut fmt::Formatter<'_>) -
     let mut current = error;
     loop {
         if let Some(segment) = current.segment() {
-            let name = match segment {
-                ErrorPathSegment::Field(name) | ErrorPathSegment::Variant(name) => name,
-            };
-            f.write_str(".")?;
-            f.write_str(name)?;
+            match segment {
+                ErrorPathSegment::Field(name) | ErrorPathSegment::Variant(name) => {
+                    f.write_str(".")?;
+                    f.write_str(name)?;
+                }
+                ErrorPathSegment::Index(index) => write!(f, "[{index}]")?,
+            }
         }
 
         match current.child() {
@@ -108,11 +109,17 @@ pub fn error_path_string(error: &dyn SchemaError) -> alloc::string::String {
     let mut current = error;
     loop {
         if let Some(segment) = current.segment() {
-            let name = match segment {
-                ErrorPathSegment::Field(name) | ErrorPathSegment::Variant(name) => name,
-            };
-            path.push('.');
-            path.push_str(name);
+            match segment {
+                ErrorPathSegment::Field(name) | ErrorPathSegment::Variant(name) => {
+                    path.push('.');
+                    path.push_str(name);
+                }
+                ErrorPathSegment::Index(index) => {
+                    use core::fmt::Write as _;
+
+                    write!(&mut path, "[{index}]").expect("formatting into String is infallible");
+                }
+            }
         }
         match current.child() {
             Some(child) => current = child,
@@ -146,7 +153,7 @@ mod tests {
 
     impl SchemaError for TestError {
         fn kind(&self) -> ErrorKind {
-            ErrorKind::CustomValidation
+            ErrorKind::InvalidBool
         }
 
         fn schema(&self) -> &'static str {
@@ -166,16 +173,34 @@ mod tests {
         }
     }
 
-    static LEAF: TestError = TestError {
-        schema: "Child",
-        segment: Some(ErrorPathSegment::Variant("File")),
+    static INDEX_LEAF: TestError = TestError {
+        schema: "Message",
+        segment: Some(ErrorPathSegment::Index(3)),
+        child: None,
+        leaf: "invalid sample",
+    };
+    static SAMPLES_ROOT: TestError = TestError {
+        schema: "Message",
+        segment: Some(ErrorPathSegment::Field("samples")),
+        child: Some(&INDEX_LEAF),
+        leaf: "unused root leaf",
+    };
+    static PATH_LEAF: TestError = TestError {
+        schema: "Path",
+        segment: Some(ErrorPathSegment::Field("path")),
         child: None,
         leaf: "deep failure",
     };
+    static FILE_CHILD: TestError = TestError {
+        schema: "Config",
+        segment: Some(ErrorPathSegment::Variant("File")),
+        child: Some(&PATH_LEAF),
+        leaf: "unused child leaf",
+    };
     static ROOT: TestError = TestError {
         schema: "Message",
-        segment: Some(ErrorPathSegment::Field("payload")),
-        child: Some(&LEAF),
+        segment: Some(ErrorPathSegment::Field("config")),
+        child: Some(&FILE_CHILD),
         leaf: "unused root leaf",
     };
 
@@ -218,15 +243,22 @@ mod tests {
     }
 
     #[test]
-    fn schema_display_walks_path_once_and_uses_deepest_leaf() {
-        assert_eq!(format!("{ROOT}"), "Message.payload.File: deep failure");
+    fn schema_display_formats_index_and_traverses_child_errors() {
+        assert_eq!(
+            format!("{SAMPLES_ROOT}"),
+            "Message.samples[3]: invalid sample"
+        );
+        assert_eq!(format!("{ROOT}"), "Message.config.File.path: deep failure");
     }
 
     #[cfg(feature = "alloc")]
     #[test]
     fn allocated_path_omits_leaf_and_matches_display_prefix() {
+        let samples_path = error_path_string(&SAMPLES_ROOT);
+        assert_eq!(samples_path, "Message.samples[3]");
+
         let path = error_path_string(&ROOT);
-        assert_eq!(path, "Message.payload.File");
+        assert_eq!(path, "Message.config.File.path");
         assert_eq!(format!("{ROOT}"), format!("{path}: deep failure"));
     }
 }

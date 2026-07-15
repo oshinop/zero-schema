@@ -1,0 +1,13 @@
+[package]
+name = "zero-schema-ui-criterion-import"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+
+[dependencies]
+criterion = "=0.7.0"
+zero-schema = { path = "../../../..", default-features = false }
+zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }

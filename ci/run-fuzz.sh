@@ -12,6 +12,8 @@ reviewed_corpus=$root/fuzz/corpus/$target
 [ -f "$lock" ] || { echo "missing fuzz lockfile" >&2; exit 1; }
 lock_sha=$(shasum -a 256 "$lock" | awk '{print $1}')
 echo "fuzz/Cargo.lock sha256: $lock_sha"
+# Keep the bounded CI search deterministic so corpus baselines are reproducible.
+fuzz_seed=424242
 verify_lock() {
     now=$(shasum -a 256 "$lock" | awk '{print $1}')
     [ "$now" = "$lock_sha" ] || { echo "fuzz/Cargo.lock changed during fuzz run" >&2; return 1; }
@@ -49,15 +51,16 @@ temporary_corpus=$temporary_root/corpus
 mkdir "$temporary_corpus"
 cp -R "$reviewed_corpus/." "$temporary_corpus/"
 
-cargo +nightly-2025-11-15 metadata --locked --manifest-path "$manifest" --format-version 1 >/dev/null
+cargo +nightly-2026-07-02 metadata --locked --manifest-path "$manifest" --format-version 1 >/dev/null
 artifact_dir=$root/target/fuzz-artifacts/$target/
 mkdir -p "$artifact_dir"
 case "$artifact_dir" in /*/) ;; *) echo "artifact directory is not absolute and trailing-slash terminated" >&2; exit 1;; esac
 
+# Keep corpus discoveries coverage-driven instead of recording equivalent input reductions.
 # cargo-fuzz does not accept Cargo's --locked flag on `fuzz run`.
-(cd "$root/fuzz" && cargo +nightly-2025-11-15 fuzz run "$target" \
+(cd "$root/fuzz" && cargo +nightly-2026-07-02 fuzz run "$target" \
     "$temporary_corpus" "$reviewed_corpus" -- \
-    -runs=10000 "-artifact_prefix=$artifact_dir")
+    -runs=10000 "-seed=$fuzz_seed" -reduce_inputs=0 "-artifact_prefix=$artifact_dir")
 
 # A zero exit from libFuzzer is provisional: it may have added, removed, or
 # rewritten corpus entries in its first (writable) corpus directory.

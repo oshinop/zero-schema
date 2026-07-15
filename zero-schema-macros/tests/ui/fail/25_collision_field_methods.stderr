@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `item_mut`
+ --> tests/ui/fail/25_collision_field_methods.rs:6:5
+  |
+6 |     item_mut: u8,
+  |     ^^^^^^^^

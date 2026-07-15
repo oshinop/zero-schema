@@ -1,0 +1,5 @@
+error: tag_field must name a scalar-enum schema field
+  --> tests/ui/fail/06_tag_field_non_enum.rs:19:24
+   |
+19 |     #[zero(tag_field = tag)]
+   |                        ^^^

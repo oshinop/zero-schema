@@ -1,0 +1,5 @@
+error: unknown container zero option `unknown`
+ --> tests/ui/fail/01_exact_grammar.rs:3:8
+  |
+3 | #[zero(unknown = "value")]
+  |        ^^^^^^^

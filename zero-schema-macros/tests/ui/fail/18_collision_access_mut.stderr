@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `access_mut`
+ --> tests/ui/fail/18_collision_access_mut.rs:5:5
+  |
+5 |     access_mut: u8,
+  |     ^^^^^^^^^^

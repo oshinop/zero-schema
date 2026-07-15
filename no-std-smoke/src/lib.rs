@@ -1,92 +1,137 @@
 #![no_std]
 
-use core::ffi::CStr;
-use widestring::{U16CStr, U16Str};
-use zero_schema::ZeroSchema;
+use zero_schema::zero;
 
-#[derive(ZeroSchema)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
-enum SmokeTag {
+pub enum SmokeKind {
     Empty = 1,
     Data = 2,
 }
 
-#[derive(ZeroSchema)]
-struct Borrowed<'a> {
-    #[zero(capacity = 4, len_type = u8)]
-    text: &'a str,
-    #[zero(capacity = 4)]
-    c_text: &'a CStr,
-    #[zero(capacity = 3, len_type = u8)]
-    wide: &'a U16Str,
-    #[zero(capacity = 3)]
-    wide_c: &'a U16CStr,
-    fixed: &'a [u8; 3],
-}
-
-#[derive(ZeroSchema)]
-struct Number {
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Number {
     value: u32,
 }
 
-#[derive(ZeroSchema)]
-#[zero(tag = SmokeTag)]
-enum Packet {
-    #[zero(tag = SmokeTag::Empty)]
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Payload {
+    #[zero(tag = SmokeKind::Empty)]
     Empty,
-    #[zero(tag = SmokeTag::Data)]
+    #[zero(tag = SmokeKind::Data)]
     Data(Number),
 }
 
-pub fn smoke_roundtrip() -> u32 {
-    let units = [0x41, 0x42];
-    let nul_units = [0x43, 0];
-    let value = Borrowed {
-        text: "rust",
-        c_text: c"zs",
-        wide: U16Str::from_slice(&units),
-        wide_c: match U16CStr::from_slice(&nul_units) {
-            Ok(value) => value,
-            Err(_) => return 1,
-        },
-        fixed: b"raw",
-    };
-    let buffer = match value.encode() {
-        Ok(buffer) => buffer,
-        Err(_) => return 2,
-    };
-    let parsed = match Borrowed::parse(buffer.as_bytes()) {
-        Ok(value) => value,
-        Err(_) => return 3,
-    };
-    if parsed.text != "rust"
-        || parsed.c_text.to_bytes() != b"zs"
-        || parsed.wide.as_slice() != units
-        || parsed.wide_c.as_slice() != [0x43]
-        || parsed.fixed != b"raw"
-    {
-        return 4;
-    }
-    let packet = match Packet::Data(Number { value: 7 }).encode() {
-        Ok(buffer) => buffer,
-        Err(_) => return 5,
-    };
-    match Packet::parse(packet.as_bytes()) {
-        Ok(Packet::Data(number)) if number.value == 7 => 0,
-        _ => 6,
+#[zero]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Packet {
+    kind: SmokeKind,
+    maybe_kind: Option<SmokeKind>,
+    #[zero(tag_field = kind)]
+    payload: Payload,
+}
+
+const PRODUCER_PACKET: [u8; 8] = [SmokeKind::Data as u8, 0, 0, 0, 7, 0, 0, 0];
+
+const _: [(); 8] = [(); Packet::SCHEMA_SIZE];
+const _: [(); 4] = [(); Packet::SCHEMA_ALIGN];
+const _: [(); 8] = [(); Packet::SCHEMA_STRIDE];
+
+#[repr(C, align(4))]
+struct ProducerPacket {
+    bytes: [u8; Packet::SCHEMA_SIZE],
+}
+
+impl ProducerPacket {
+    const fn from_reviewed_bytes() -> Self {
+        Self {
+            bytes: PRODUCER_PACKET,
+        }
     }
 }
 
-pub fn smoke_prefix() -> u32 {
-    let mut input = [0u8; Packet::WIRE_SIZE + 3];
-    let encoded = match Packet::Empty.encode() {
-        Ok(buffer) => buffer,
-        Err(_) => return 10,
+/// Exercises a producer-owned external-tag record and a zero-sentinel option
+/// without initializing wire bytes in Rust or enabling allocation.
+pub fn smoke_access_read_mutate_copy() -> u32 {
+    let mut producer = ProducerPacket::from_reviewed_bytes();
+
+    let view = match Packet::access(&producer.bytes) {
+        Ok(view) => view,
+        Err(_) => return 1,
     };
-    input[..Packet::WIRE_SIZE].copy_from_slice(encoded.as_bytes());
-    input[Packet::WIRE_SIZE..].copy_from_slice(&[7, 8, 9]);
-    match Packet::parse_prefix(&input) {
-        Ok((Packet::Empty, rest)) if rest == [7, 8, 9] => 0,
-        _ => 11,
+    if view.kind() != SmokeKind::Data {
+        return 2;
+    }
+    if view.maybe_kind().is_some() {
+        return 3;
+    }
+    let payload = view.payload();
+    if payload.tag() != SmokeKind::Data {
+        return 4;
+    }
+    match payload.data() {
+        Some(number) if number.value() == 7 => {}
+        _ => return 5,
+    }
+    match view.copy_into() {
+        Packet {
+            maybe_kind: None,
+            payload: Payload::Data(Number { value: 7 }),
+            ..
+        } => {}
+        _ => return 6,
+    }
+
+    {
+        let mut view = match Packet::access_mut(&mut producer.bytes) {
+            Ok(view) => view,
+            Err(_) => return 7,
+        };
+        if view.maybe_kind_mut().set(Some(SmokeKind::Empty)).is_err() {
+            return 8;
+        }
+    }
+    match Packet::access(&producer.bytes) {
+        Ok(view) if view.maybe_kind() == Some(SmokeKind::Empty) => {}
+        _ => return 9,
+    }
+
+    {
+        let mut view = match Packet::access_mut(&mut producer.bytes) {
+            Ok(view) => view,
+            Err(_) => return 10,
+        };
+        if view.maybe_kind_mut().set(None).is_err() {
+            return 11;
+        }
+        let mut payload = view.payload_mut();
+        let Some(mut number) = payload.data_mut() else {
+            return 12;
+        };
+        if number.value_mut().set(9).is_err() {
+            return 13;
+        }
+    }
+
+    let view = match Packet::access(&producer.bytes) {
+        Ok(view) => view,
+        Err(_) => return 14,
+    };
+    match (view.maybe_kind(), view.payload().data()) {
+        (None, Some(number)) if number.value() == 9 => 0,
+        _ => 15,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_producer_record_supports_capabilities() {
+        assert_eq!(smoke_access_read_mutate_copy(), 0);
     }
 }

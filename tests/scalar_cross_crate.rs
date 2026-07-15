@@ -1,42 +1,37 @@
-use zero_schema::{Endian, ErrorKind, IntegerRepr, LayoutError, TypeKind, ZeroSchemaType};
+use zero_schema::{Endian, ErrorKind, IntegerRepr, LayoutError, TypeKind};
 use zero_schema_cross_crate_child::{BigCode, LittleCode, NativeCode};
 use zero_schema_cross_crate_consumer::{
-    big_layout_facts, big_unknown_facts, encode_big, encode_little, encode_native, parse_big,
-    parse_little_prefix,
+    big_layout_facts, big_unknown_facts, read_big, read_little,
 };
-
-fn requires_only_schema<T: ZeroSchemaType>() {}
 
 #[repr(align(4))]
 struct Aligned<const N: usize>([u8; N]);
 
 #[test]
-fn public_derive_only_values_cross_the_crate_boundary() {
-    requires_only_schema::<BigCode>();
-    requires_only_schema::<NativeCode>();
+fn public_scalar_capabilities_cross_the_crate_boundary() {
+    let big = Aligned(*include_bytes!(
+        "../test-fixtures/cross-crate-child/golden/big-ready.bin"
+    ));
+    assert_eq!(read_big(&big.0), Ok(0x0102));
 
-    assert_eq!(encode_big(BigCode::Ready), [0x01, 0x02]);
-    assert_eq!(encode_big(BigCode::r#type), [0xab, 0xcd]);
-    assert_eq!(encode_little(LittleCode::First), [0x04, 0x03, 0x02, 0x01]);
+    let little = Aligned(*include_bytes!(
+        "../test-fixtures/cross-crate-child/golden/little-first.bin"
+    ));
+    assert_eq!(read_little(&little.0), Ok(0x0102_0304));
+
     assert_eq!(
-        encode_native(NativeCode::Marker),
-        0x1122_3344u32.to_ne_bytes()
+        (
+            BigCode::SCHEMA_SIZE,
+            BigCode::SCHEMA_ALIGN,
+            BigCode::SCHEMA_STRIDE
+        ),
+        (2, 2, 2)
     );
-
-    let big = Aligned([0xab, 0xcd]);
-    assert_eq!(parse_big(&big.0), Ok(0xabcd));
-
-    let prefixed = Aligned([0x04, 0x03, 0x02, 0x01, 9, 8]);
-    let (value, rest) = parse_little_prefix(&prefixed.0).unwrap();
-    assert_eq!(value, 0x0102_0304);
-    assert_eq!(rest, &[9, 8]);
+    assert_eq!(NativeCode::SCHEMA_SIZE, 4);
 }
 
 #[test]
 fn child_metadata_is_public_ordered_and_normalizes_raw_names() {
-    assert_eq!(BigCode::WIRE_SIZE, 2);
-    assert_eq!(BigCode::WIRE_ALIGN, 2);
-    assert_eq!(BigCode::WIRE_STRIDE, 2);
     assert_eq!(BigCode::LAYOUT.name(), "BigCode");
     assert_eq!(
         BigCode::LAYOUT.kind(),
@@ -67,20 +62,16 @@ fn child_metadata_is_public_ordered_and_normalizes_raw_names() {
 }
 
 #[test]
-fn consumer_exposes_exact_structured_error_facts() {
+fn consumer_exposes_structured_access_error_facts() {
     let unknown_bytes = Aligned([0, 3]);
     let unknown = big_unknown_facts(&unknown_bytes.0);
-    assert_eq!(unknown.display, "BigCode: unknown enum value 3");
+    assert_eq!(unknown.display, "BigCode: unknown scalar enum value");
     assert_eq!(unknown.kind, ErrorKind::UnknownEnumValue);
     assert_eq!(unknown.schema, "BigCode");
     assert_eq!(unknown.source, None);
 
     let short = Aligned([0]);
     let layout = big_layout_facts(&short.0);
-    assert_eq!(
-        layout.display,
-        "BigCode: incorrect size: expected 2 bytes, got 1"
-    );
     assert_eq!(layout.kind, ErrorKind::Layout);
     assert_eq!(layout.schema, "BigCode");
     assert_eq!(
