@@ -113,16 +113,20 @@ fn main() {
         .warnings(true)
         .warnings_into_errors(true)
         .file(cpp_path);
-    for flag in [
-        "-Wall",
-        "-Wextra",
-        "-Wpedantic",
-        "-Wconversion",
-        "-Wsign-conversion",
-        "/permissive-",
-        "/W4",
-    ] {
-        build.flag_if_supported(flag);
+    let is_msvc = build.get_compiler().is_like_msvc();
+    if is_msvc {
+        // C4324 reports the deliberate padding introduced by generated `alignas` layouts.
+        build.flag("/permissive-").flag("/W4").flag("/wd4324");
+    } else {
+        for flag in [
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+            "-Wconversion",
+            "-Wsign-conversion",
+        ] {
+            build.flag_if_supported(flag);
+        }
     }
     let compiler = build.get_compiler();
     let mut version = std::process::Command::new(compiler.path());

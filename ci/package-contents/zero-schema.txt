@@ -14,6 +14,7 @@ examples/generic_receiving_buffer.rs
 examples/no_std_wasm.rs
 examples/optional.rs
 examples/records.rs
+examples/strings.rs
 examples/tagged.rs
 src/__private.rs
 src/access.rs

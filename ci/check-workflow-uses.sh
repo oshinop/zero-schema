@@ -73,5 +73,12 @@ ci = File.read(File.join(dir, "ci.yml"))
 errors << "#{dir}/ci.yml: pinned-cross must remove legacy apt source files" unless ci.include?("rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources")
 errors << "#{dir}/ci.yml: pinned-cross must upload SHA-named evidence" unless ci.include?('name: pinned-cross-${{ github.sha }}') && ci.include?("target/pinned-cross-evidence")
 errors << "#{dir}/ci.yml: pinned-cross evidence upload must retain 90 days" unless ci.match?(/name: pinned-cross-\$\{\{ github\.sha \}\}.*?overwrite: true.*?retention-days: 90/m)
+ci_document = YAML.safe_load(ci, permitted_classes: [], permitted_symbols: [], aliases: false, filename: File.join(dir, "ci.yml"))
+pinned_cross = ci_document.fetch("jobs").fetch("pinned-cross")
+pinned_run = pinned_cross.fetch("steps").map { |step| step["run"] }.compact.join("\n")
+errors << "#{dir}/ci.yml: pinned-cross must stop within 30 minutes" unless pinned_cross["timeout-minutes"] == 30
+errors << "#{dir}/ci.yml: i686 must run through the native cross-libc loader" unless pinned_run.include?('CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="/usr/i686-linux-gnu/lib/ld-linux.so.2 --library-path /usr/i686-linux-gnu/lib"')
+errors << "#{dir}/ci.yml: i686 must not run through qemu-i386" if pinned_run.include?('CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="qemu-i386')
+errors << "#{dir}/ci.yml: both cross-target tests must have five-minute process limits" unless pinned_run.scan("timeout --kill-after=30s 5m cargo +1.85.0 test").length == 2
 abort(errors.join("\n")) unless errors.empty?
 RUBY

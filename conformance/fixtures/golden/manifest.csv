@@ -6,9 +6,9 @@ linux-x86_64-le,1004,conformance/fixtures/golden/linux-x86_64-le/1004.bin,8,1511
 linux-x86_64-le,1005,conformance/fixtures/golden/linux-x86_64-le/1005.bin,128,d31a79e7a530e93da32ead2ee83960949073e41ee897438b9cbfa8cb7d9329d3
 linux-x86_64-le,1006,conformance/fixtures/golden/linux-x86_64-le/1006.bin,20,cbc05c0e98cec3180caa02967a6579628187dfef0a1a2706b12bc6c68b94eac5
 linux-x86_64-le,1007,conformance/fixtures/golden/linux-x86_64-le/1007.bin,84,0662338f965baeb54aaaad8be01b617a75c601129c57fe71f3507635b51eb425
-linux-x86_64-le,1008,conformance/fixtures/golden/linux-x86_64-le/1008.bin,16,9b23ca6bbebc5f47ed74142a8ef636657f6215e6fc856b5694d6ae365159ecb7
+linux-x86_64-le,1008,conformance/fixtures/golden/linux-x86_64-le/1008.bin,20,a12a45ecf30407cd6a559670b70db2969f361455b4ea7f2694ce908e41f678d1
 linux-x86_64-le,1010,conformance/fixtures/golden/linux-x86_64-le/1010.bin,12,eee46794d251d7a2d321009cec6e54e487f2cf52034390949d0a8271b0278e5d
-linux-x86_64-le,1011,conformance/fixtures/golden/linux-x86_64-le/1011.bin,16,cbb4b1c0fa31880d1ec7fdfe8bc707b486a1565809f2e0fe4b4e7804534ea8ff
+linux-x86_64-le,1011,conformance/fixtures/golden/linux-x86_64-le/1011.bin,24,d8d5f3d7ecc454ea5197db4539b052c063a73ee829656a4ceb0618f1b9c3d0ae
 linux-i686-le,1001,conformance/fixtures/golden/linux-i686-le/1001.bin,8,4da0fe15a75310215ec4f8f50168f595d446bf2bc3369b8595f28ea3f4ca38e1
 linux-i686-le,1002,conformance/fixtures/golden/linux-i686-le/1002.bin,24,7995f4b57f0dab0859cf8e268065a3c85f08168e697555c0ff8f92e74ab4a59e
 linux-i686-le,1003,conformance/fixtures/golden/linux-i686-le/1003.bin,8,a111f275cc2e7588000001d300a31e76336d15b9d314cd1a1d8f3d3556975eed
@@ -16,9 +16,9 @@ linux-i686-le,1004,conformance/fixtures/golden/linux-i686-le/1004.bin,8,15115001
 linux-i686-le,1005,conformance/fixtures/golden/linux-i686-le/1005.bin,124,25acd94d1288198746d43bbd69b7fd13858aaf7d5cc4627bdd9e9c2cdc0ef59e
 linux-i686-le,1006,conformance/fixtures/golden/linux-i686-le/1006.bin,20,cbc05c0e98cec3180caa02967a6579628187dfef0a1a2706b12bc6c68b94eac5
 linux-i686-le,1007,conformance/fixtures/golden/linux-i686-le/1007.bin,84,0662338f965baeb54aaaad8be01b617a75c601129c57fe71f3507635b51eb425
-linux-i686-le,1008,conformance/fixtures/golden/linux-i686-le/1008.bin,16,9b23ca6bbebc5f47ed74142a8ef636657f6215e6fc856b5694d6ae365159ecb7
+linux-i686-le,1008,conformance/fixtures/golden/linux-i686-le/1008.bin,20,a12a45ecf30407cd6a559670b70db2969f361455b4ea7f2694ce908e41f678d1
 linux-i686-le,1010,conformance/fixtures/golden/linux-i686-le/1010.bin,12,eee46794d251d7a2d321009cec6e54e487f2cf52034390949d0a8271b0278e5d
-linux-i686-le,1011,conformance/fixtures/golden/linux-i686-le/1011.bin,16,cbb4b1c0fa31880d1ec7fdfe8bc707b486a1565809f2e0fe4b4e7804534ea8ff
+linux-i686-le,1011,conformance/fixtures/golden/linux-i686-le/1011.bin,24,d8d5f3d7ecc454ea5197db4539b052c063a73ee829656a4ceb0618f1b9c3d0ae
 macos-aarch64-le,1001,conformance/fixtures/golden/macos-aarch64-le/1001.bin,8,4da0fe15a75310215ec4f8f50168f595d446bf2bc3369b8595f28ea3f4ca38e1
 macos-aarch64-le,1002,conformance/fixtures/golden/macos-aarch64-le/1002.bin,24,7995f4b57f0dab0859cf8e268065a3c85f08168e697555c0ff8f92e74ab4a59e
 macos-aarch64-le,1003,conformance/fixtures/golden/macos-aarch64-le/1003.bin,8,a111f275cc2e7588000001d300a31e76336d15b9d314cd1a1d8f3d3556975eed
@@ -36,9 +36,9 @@ windows-x86_64-msvc-le,1004,conformance/fixtures/golden/windows-x86_64-msvc-le/1
 windows-x86_64-msvc-le,1005,conformance/fixtures/golden/windows-x86_64-msvc-le/1005.bin,128,d31a79e7a530e93da32ead2ee83960949073e41ee897438b9cbfa8cb7d9329d3
 windows-x86_64-msvc-le,1006,conformance/fixtures/golden/windows-x86_64-msvc-le/1006.bin,20,cbc05c0e98cec3180caa02967a6579628187dfef0a1a2706b12bc6c68b94eac5
 windows-x86_64-msvc-le,1007,conformance/fixtures/golden/windows-x86_64-msvc-le/1007.bin,84,0662338f965baeb54aaaad8be01b617a75c601129c57fe71f3507635b51eb425
-windows-x86_64-msvc-le,1008,conformance/fixtures/golden/windows-x86_64-msvc-le/1008.bin,16,9b23ca6bbebc5f47ed74142a8ef636657f6215e6fc856b5694d6ae365159ecb7
+windows-x86_64-msvc-le,1008,conformance/fixtures/golden/windows-x86_64-msvc-le/1008.bin,20,a12a45ecf30407cd6a559670b70db2969f361455b4ea7f2694ce908e41f678d1
 windows-x86_64-msvc-le,1010,conformance/fixtures/golden/windows-x86_64-msvc-le/1010.bin,12,eee46794d251d7a2d321009cec6e54e487f2cf52034390949d0a8271b0278e5d
-windows-x86_64-msvc-le,1011,conformance/fixtures/golden/windows-x86_64-msvc-le/1011.bin,16,cbb4b1c0fa31880d1ec7fdfe8bc707b486a1565809f2e0fe4b4e7804534ea8ff
+windows-x86_64-msvc-le,1011,conformance/fixtures/golden/windows-x86_64-msvc-le/1011.bin,24,d8d5f3d7ecc454ea5197db4539b052c063a73ee829656a4ceb0618f1b9c3d0ae
 linux-powerpc64-be,1001,conformance/fixtures/golden/linux-powerpc64-be/1001.bin,8,4da0fe15a75310215ec4f8f50168f595d446bf2bc3369b8595f28ea3f4ca38e1
 linux-powerpc64-be,1002,conformance/fixtures/golden/linux-powerpc64-be/1002.bin,24,14ba6c55342f432841845898fb2b096cc3c271480862ecb161d929b0eeff5cbf
 linux-powerpc64-be,1003,conformance/fixtures/golden/linux-powerpc64-be/1003.bin,8,a111f275cc2e7588000001d300a31e76336d15b9d314cd1a1d8f3d3556975eed
@@ -46,6 +46,6 @@ linux-powerpc64-be,1004,conformance/fixtures/golden/linux-powerpc64-be/1004.bin,
 linux-powerpc64-be,1005,conformance/fixtures/golden/linux-powerpc64-be/1005.bin,128,5a6fae247ae9c2d00d63b32a592c17009663e256cfc4a36cac3a695f36cd2a14
 linux-powerpc64-be,1006,conformance/fixtures/golden/linux-powerpc64-be/1006.bin,20,dac2c3be44b74e6d56d8a16eceb4a6bd4667e3e6dd83caf61803c3a420868433
 linux-powerpc64-be,1007,conformance/fixtures/golden/linux-powerpc64-be/1007.bin,84,df98baea4ed695d1e08675b51914fd57f17dc4ee5c1ea7252709fbdc9dc89253
-linux-powerpc64-be,1008,conformance/fixtures/golden/linux-powerpc64-be/1008.bin,16,9b23ca6bbebc5f47ed74142a8ef636657f6215e6fc856b5694d6ae365159ecb7
+linux-powerpc64-be,1008,conformance/fixtures/golden/linux-powerpc64-be/1008.bin,20,da976c987145b42e4eac4b524972524ac609ada52ced247f7480e763a5a0bfa5
 linux-powerpc64-be,1010,conformance/fixtures/golden/linux-powerpc64-be/1010.bin,12,94ea81cfd5f7bb157bd61bd00353846eb3b42a6a2ad72b70a0b7f09c7e8c92e8
-linux-powerpc64-be,1011,conformance/fixtures/golden/linux-powerpc64-be/1011.bin,16,cbb4b1c0fa31880d1ec7fdfe8bc707b486a1565809f2e0fe4b4e7804534ea8ff
+linux-powerpc64-be,1011,conformance/fixtures/golden/linux-powerpc64-be/1011.bin,24,d8d5f3d7ecc454ea5197db4539b052c063a73ee829656a4ceb0618f1b9c3d0ae

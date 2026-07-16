@@ -392,7 +392,10 @@ fn exercise_optional(input: &[u8]) -> bool {
     if view.copy_from(&OptionalFuzzRootPatch::default()).is_err() {
         return false;
     }
-    if view.copy_from(&OptionalFuzzRootPatch::from(logical)).is_err() {
+    if view
+        .copy_from(&OptionalFuzzRootPatch::from(logical))
+        .is_err()
+    {
         return false;
     }
     release(view);
@@ -439,13 +442,13 @@ pub fn roundtrip_message(input: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zero_schema::SchemaError;
     use sha2::{Digest, Sha256};
     use std::{
         collections::{BTreeMap, BTreeSet},
         fs,
         path::{Path, PathBuf},
     };
+    use zero_schema::SchemaError;
 
     const HEADER: &str = "root_id,type_key,fuzz_target,selector,golden_path,golden_len,golden_sha256,valid_seed_path,valid_seed_sha256,invalid_seed_path,invalid_seed_sha256";
 
@@ -496,8 +499,9 @@ mod tests {
     }
 
     fn fuzz_target_entrypoint(root: &Path, target: &str) -> String {
-        let source = fs::read_to_string(root.join("fuzz/fuzz_targets").join(format!("{target}.rs")))
-            .expect("registered fuzz target source exists");
+        let source =
+            fs::read_to_string(root.join("fuzz/fuzz_targets").join(format!("{target}.rs")))
+                .expect("registered fuzz target source exists");
         source
             .split_once("zero_schema_fuzz::")
             .and_then(|(_, call)| call.split_once('('))
@@ -671,7 +675,10 @@ mod tests {
         assert_eq!(absent.maybe_code, None);
         assert_eq!(absent.maybe_child, None);
         assert_eq!(absent.maybe_codes, None);
-        assert!(exercise_optional(&bytes.0), "all-zero optionals roundtrip through targets");
+        assert!(
+            exercise_optional(&bytes.0),
+            "all-zero optionals roundtrip through targets"
+        );
 
         {
             let mut root = OptionalFuzzRoot::access_mut(&mut bytes.0)
@@ -723,11 +730,13 @@ mod tests {
 
         let mut absent = AlignedBytes([0; OptionalFuzzRoot::SCHEMA_SIZE]);
         let before_incomplete = absent.0;
-        let mut incomplete = OptionalFuzzRootPatch::default();
-        incomplete.maybe_child = Some(Some(OptionalFuzzChildPatch {
-            code: None,
-            payload: Some(99),
-        }));
+        let incomplete = OptionalFuzzRootPatch {
+            maybe_child: Some(Some(OptionalFuzzChildPatch {
+                code: None,
+                payload: Some(99),
+            })),
+            ..Default::default()
+        };
         let error = OptionalFuzzRoot::access_mut(&mut absent.0)
             .expect("absent optional child is mutable")
             .copy_from(&incomplete)
@@ -758,8 +767,10 @@ mod tests {
             "nonzero internal child padding stays valid while the child is Some"
         );
         let before_clear = clear_bytes.0;
-        let mut clear = OptionalFuzzRootPatch::default();
-        clear.maybe_child = Some(None);
+        let clear = OptionalFuzzRootPatch {
+            maybe_child: Some(None),
+            ..Default::default()
+        };
         OptionalFuzzRoot::access_mut(&mut clear_bytes.0)
             .expect("present child is mutable")
             .copy_from(&clear)

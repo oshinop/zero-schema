@@ -132,6 +132,7 @@ jobs:
 
 
   pinned-cross:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -159,8 +160,19 @@ jobs:
             CXX=clang++ cargo +1.97.0 test --locked -p zero-schema-conformance --target-dir target/pinned-clang
             CXX=clang++ CXXFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" RUSTFLAGS="-C linker=clang++ -C link-arg=-fsanitize=address -C link-arg=-fsanitize=undefined -C link-arg=-lstdc++" ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" cargo +1.97.0 test --locked -p zero-schema-conformance --target-dir target/pinned-sanitized
             ci/check-wide-endian.sh big powerpc64-unknown-linux-gnu
-            CC_i686_unknown_linux_gnu=i686-linux-gnu-gcc CXX_i686_unknown_linux_gnu=i686-linux-gnu-g++ AR_i686_unknown_linux_gnu=i686-linux-gnu-ar CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="qemu-i386 -L /usr/i686-linux-gnu" cargo +1.85.0 test --locked -p zero-schema-conformance --target i686-unknown-linux-gnu --target-dir target/conformance-i686
-            CC_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-gcc CXX_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-g++ AR_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-ar CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_LINKER=powerpc64-linux-gnu-gcc CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_RUNNER="qemu-ppc64 -L /usr/powerpc64-linux-gnu" cargo +1.85.0 test --locked -p zero-schema-conformance --target powerpc64-unknown-linux-gnu --target-dir target/conformance-powerpc64
+            test -x /usr/i686-linux-gnu/lib/ld-linux.so.2
+            CC_i686_unknown_linux_gnu=i686-linux-gnu-gcc \
+              CXX_i686_unknown_linux_gnu=i686-linux-gnu-g++ \
+              AR_i686_unknown_linux_gnu=i686-linux-gnu-ar \
+              CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc \
+              CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="/usr/i686-linux-gnu/lib/ld-linux.so.2 --library-path /usr/i686-linux-gnu/lib" \
+              timeout --kill-after=30s 5m cargo +1.85.0 test --locked -p zero-schema-conformance --target i686-unknown-linux-gnu --target-dir target/conformance-i686
+            CC_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-gcc \
+              CXX_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-g++ \
+              AR_powerpc64_unknown_linux_gnu=powerpc64-linux-gnu-ar \
+              CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_LINKER=powerpc64-linux-gnu-gcc \
+              CARGO_TARGET_POWERPC64_UNKNOWN_LINUX_GNU_RUNNER="qemu-ppc64 -L /usr/powerpc64-linux-gnu" \
+              timeout --kill-after=30s 5m cargo +1.85.0 test --locked -p zero-schema-conformance --target powerpc64-unknown-linux-gnu --target-dir target/conformance-powerpc64
           '
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

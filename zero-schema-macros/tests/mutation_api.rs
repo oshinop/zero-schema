@@ -830,7 +830,8 @@ fn nested_tagged_logical_array_rejects_mismatched_sibling_tag_atomically() {
 
 #[test]
 fn generated_string_handles_preserve_capacity_tails() {
-    let mut bytes = [0_u8; TextPacket::<'static>::SCHEMA_SIZE];
+    let mut storage = zs::schema_buffer!(TextPacket<'static>);
+    let bytes = storage.as_bytes_mut();
     bytes[0..4].copy_from_slice(&1_u32.to_ne_bytes());
     bytes[4] = b'a';
     bytes[8..10].copy_from_slice(b"b\0");
@@ -842,19 +843,23 @@ fn generated_string_handles_preserve_capacity_tails() {
     let c = c"xy";
     let wide = U16Str::from_slice(&[17]);
     let c_wide = U16CStr::from_slice(&[19, 0]).unwrap();
-    let mut text = TextPacket::access_mut(&mut bytes).unwrap();
+    let mut text = TextPacket::access_mut(bytes).unwrap();
     text.narrow_mut().set("z").unwrap();
     text.c_narrow_mut().set(c).unwrap();
     text.wide_mut().set(wide).unwrap();
     text.c_wide_mut().set(c_wide).unwrap();
     release(text);
 
-    let text = TextPacket::access(&bytes).unwrap();
+    let text = TextPacket::access(storage.as_bytes()).unwrap();
     assert_eq!(text.narrow(), "z");
     assert_eq!(text.c_narrow().to_bytes(), b"xy");
     assert_eq!(text.wide().as_slice(), &[17]);
     assert_eq!(text.c_wide().as_slice(), &[19]);
-    assert_eq!(bytes[7], tail, "unused narrow capacity stays untouched");
+    assert_eq!(
+        storage.as_bytes()[7],
+        tail,
+        "unused narrow capacity stays untouched"
+    );
 }
 
 #[test]
@@ -1030,7 +1035,8 @@ fn tagged_logical_copy_initializes_nested_inactive_target_before_outer_tag() {
 
 #[test]
 fn record_patch_preflights_later_string_before_earlier_commit() {
-    let mut bytes = [0_u8; TextPacket::<'static>::SCHEMA_SIZE];
+    let mut storage = zs::schema_buffer!(TextPacket<'static>);
+    let bytes = storage.as_bytes_mut();
     bytes[0..4].copy_from_slice(&1_u32.to_ne_bytes());
     bytes[4] = b'a';
     bytes[8..10].copy_from_slice(b"b\0");
@@ -1038,7 +1044,7 @@ fn record_patch_preflights_later_string_before_earlier_commit() {
     bytes[16..18].copy_from_slice(&11_u16.to_ne_bytes());
     bytes[20..22].copy_from_slice(&13_u16.to_ne_bytes());
     bytes[22..24].copy_from_slice(&0_u16.to_ne_bytes());
-    let before = bytes;
+    let before: [u8; TextPacket::SCHEMA_SIZE] = storage.as_bytes().try_into().unwrap();
     let too_long = c"long";
     let patch = TextPacketPatch {
         narrow: Some("ok"),
@@ -1048,13 +1054,14 @@ fn record_patch_preflights_later_string_before_earlier_commit() {
     };
 
     assert!(
-        TextPacket::access_mut(&mut bytes)
+        TextPacket::access_mut(storage.as_bytes_mut())
             .unwrap()
             .copy_from(&patch)
             .is_err()
     );
     assert_eq!(
-        bytes, before,
+        storage.as_bytes(),
+        before,
         "a later string preflight failure must be byte-exact"
     );
 }
