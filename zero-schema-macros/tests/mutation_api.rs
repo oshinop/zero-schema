@@ -830,7 +830,7 @@ fn nested_tagged_logical_array_rejects_mismatched_sibling_tag_atomically() {
 
 #[test]
 fn generated_string_handles_preserve_capacity_tails() {
-    let mut storage = zs::schema_buffer!(TextPacket<'static>);
+    let mut storage = zs::make_schema_buffer!(TextPacket<'static>);
     let bytes = storage.as_bytes_mut();
     bytes[0..4].copy_from_slice(&1_u32.to_ne_bytes());
     bytes[4] = b'a';
@@ -1035,7 +1035,7 @@ fn tagged_logical_copy_initializes_nested_inactive_target_before_outer_tag() {
 
 #[test]
 fn record_patch_preflights_later_string_before_earlier_commit() {
-    let mut storage = zs::schema_buffer!(TextPacket<'static>);
+    let mut storage = zs::make_schema_buffer!(TextPacket<'static>);
     let bytes = storage.as_bytes_mut();
     bytes[0..4].copy_from_slice(&1_u32.to_ne_bytes());
     bytes[4] = b'a';

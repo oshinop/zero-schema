@@ -19,9 +19,10 @@ Initial public release of `zero-schema` and `zero-schema-macros`.
   `access` and `access_mut` constructors. Successful calls return compact logical
   capabilities only after representation safety and declared bounds are proven.
 - Root records and scalar enums expose `SCHEMA_SIZE`, `SCHEMA_ALIGN`,
-  `SCHEMA_STRIDE`, and diagnostic `LAYOUT` metadata. `schema_buffer!` provides
-  aligned initialized receiving storage for a fully concrete root; its initial bytes
-  carry no promised schema interpretation.
+  `SCHEMA_STRIDE`, and diagnostic `LAYOUT` metadata. `schema_buffer!` names the
+  aligned initialized receiving-storage type for a fully concrete root, while
+  `make_schema_buffer!` constructs a value. Initial bytes carry no promised schema
+  interpretation.
 - Shared capabilities expose field-named reads and `copy_into`. Exclusive
   capabilities expose short field-local mutable reborrows, constrained field
   updates, and transactional `copy_from` patches. `ArrayRef`/`ArrayRefIter` and

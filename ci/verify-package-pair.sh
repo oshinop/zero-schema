@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn producer_access_materialization_mutation_and_receiving_storage() {
-        let mut storage = zs::schema_buffer!(Probe);
+        let mut storage = zs::make_schema_buffer!(Probe);
         assert_eq!(storage.as_bytes().len(), Probe::SCHEMA_SIZE);
         assert_eq!(storage.as_bytes().as_ptr() as usize % Probe::SCHEMA_ALIGN, 0);
 

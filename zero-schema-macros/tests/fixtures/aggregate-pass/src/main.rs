@@ -46,6 +46,7 @@ fn main() {
     let _ = Record::<'static, 3>::SCHEMA_STRIDE;
     let _ = Record::<'static, 3>::LAYOUT;
     let _ = Kind::SCHEMA_SIZE;
-    let _ = zs::schema_buffer!(Record<'static, 3>);
+    type RecordBuffer = zs::schema_buffer!(Record<'static, 3>);
+    let _: RecordBuffer = zs::make_schema_buffer!(Record<'static, 3>);
     let _ = Message::SCHEMA_SIZE;
 }

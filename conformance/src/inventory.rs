@@ -362,7 +362,7 @@ pub(crate) fn native_option_layout() -> Result<Pairs, HarnessError> {
 
 fn obs1(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceScalars::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceScalars);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceScalars);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceScalars::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -374,7 +374,7 @@ fn obs1(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs2(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceAligned::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceAligned);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceAligned);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceAligned::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -386,7 +386,7 @@ fn obs2(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs3(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceMessageRecord::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceMessageRecord);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceMessageRecord);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceMessageRecord::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -394,7 +394,7 @@ fn obs3(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs4(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceMessageRecord::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceMessageRecord);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceMessageRecord);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceMessageRecord::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -408,7 +408,7 @@ fn obs4(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs5(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformancePrimitives::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformancePrimitives);
+    let mut storage = zero_schema::make_schema_buffer!(ConformancePrimitives);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformancePrimitives::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -449,7 +449,7 @@ fn obs5(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs6(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceEnums::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceEnums);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceEnums);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceEnums::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -465,7 +465,7 @@ fn obs6(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs7(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceStrings::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceStrings<'static>);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceStrings<'static>);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceStrings::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -519,7 +519,7 @@ fn obs7(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs8(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceNested::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceNested);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceNested);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceNested::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -536,7 +536,7 @@ fn obs8(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs10(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceExternalMessage::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceExternalMessage);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceExternalMessage);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceExternalMessage::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -553,7 +553,7 @@ fn obs10(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 }
 fn obs11(bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceExternalUnits::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceExternalUnits);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceExternalUnits);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceExternalUnits::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust access"))?;
@@ -567,7 +567,7 @@ fn obs11(bytes: &[u8]) -> Result<Pairs, HarnessError> {
 #[cfg(test)]
 pub(crate) fn native_option_observe(case_id: u32, bytes: &[u8]) -> Result<Pairs, HarnessError> {
     incoming(ConformanceOptions::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceOptions);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceOptions);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceOptions::access(storage.as_bytes())
         .map_err(|_| HarnessError::InvalidData("C++ option bytes failed Rust access"))?;
@@ -582,7 +582,7 @@ pub(crate) fn native_option_observe(case_id: u32, bytes: &[u8]) -> Result<Pairs,
 #[cfg(test)]
 pub(crate) fn native_option_clear_child(bytes: &[u8]) -> Result<Vec<u8>, HarnessError> {
     incoming(ConformanceOptions::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceOptions);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceOptions);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let mut view = ConformanceOptions::access_mut(storage.as_bytes_mut())
         .map_err(|_| HarnessError::InvalidData("C++ option bytes failed Rust mutable access"))?;
@@ -595,7 +595,7 @@ pub(crate) fn native_option_clear_child(bytes: &[u8]) -> Result<Vec<u8>, Harness
 
 fn mutate1(bytes: &[u8]) -> Result<Vec<u8>, HarnessError> {
     incoming(ConformanceScalars::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceScalars);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceScalars);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let mut view = ConformanceScalars::access_mut(storage.as_bytes_mut())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust mutable access"))?;
@@ -607,7 +607,7 @@ fn mutate1(bytes: &[u8]) -> Result<Vec<u8>, HarnessError> {
 }
 fn mutate10(bytes: &[u8]) -> Result<Vec<u8>, HarnessError> {
     incoming(ConformanceExternalMessage::SCHEMA_SIZE, bytes.len())?;
-    let mut storage = zero_schema::schema_buffer!(ConformanceExternalMessage);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceExternalMessage);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let mut view = ConformanceExternalMessage::access_mut(storage.as_bytes_mut())
         .map_err(|_| HarnessError::InvalidData("C++ producer bytes failed Rust mutable access"))?;

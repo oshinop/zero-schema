@@ -22,7 +22,7 @@ pub struct OptionalRoot {
 }
 
 fn main() {
-    let mut storage = zs::schema_buffer!(OptionalRoot);
+    let mut storage = zs::make_schema_buffer!(OptionalRoot);
     let _: Result<OptionalRootRef<'_>, OptionalRootAccessError> =
         OptionalRoot::access(storage.as_bytes());
     let _: (usize, usize, usize) = (

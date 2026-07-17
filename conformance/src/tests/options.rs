@@ -37,7 +37,7 @@ fn assert_shared_observation(case_id: u32, bytes: &[u8], values: [u64; 3]) {
 }
 
 fn assert_declared_payloads(case_id: u32, bytes: &[u8]) {
-    let mut storage = zero_schema::schema_buffer!(ConformanceOptions);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceOptions);
     storage.as_bytes_mut().copy_from_slice(bytes);
     let view = ConformanceOptions::access(storage.as_bytes())
         .unwrap_or_else(|_| panic!("declared native option payload {case_id} is valid"));
@@ -189,7 +189,7 @@ fn nonzero_internal_padding_is_valid_for_present_nested_option() {
     bytes[child.offset() + padding.start()..child.offset() + padding.end()].fill(0xa5);
 
     assert_shared_observation(1014, &bytes, [0, 1, 0]);
-    let mut storage = zero_schema::schema_buffer!(ConformanceOptions);
+    let mut storage = zero_schema::make_schema_buffer!(ConformanceOptions);
     storage.as_bytes_mut().copy_from_slice(&bytes);
     let view = ConformanceOptions::access(storage.as_bytes())
         .expect("nonzero internal child padding remains a valid Some");

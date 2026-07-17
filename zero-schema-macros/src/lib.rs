@@ -74,10 +74,11 @@
 //! # Receiving storage
 //!
 //! [`zero_schema::schema_buffer!`](https://docs.rs/zero-schema/latest/zero_schema/macro.schema_buffer.html)
-//! accepts a fully concrete root and returns aligned initialized receiving storage. It
-//! is not a schema initializer: a producer must populate it, then the root's `access`
-//! decides whether the current bytes are type-valid. Tagged payload declarations are
-//! intentionally rejected here.
+//! names the aligned initialized receiving-storage type for a fully concrete root;
+//! [`zero_schema::make_schema_buffer!`](https://docs.rs/zero-schema/latest/zero_schema/macro.make_schema_buffer.html)
+//! constructs a value. Neither initializes a schema: a producer must populate the
+//! bytes, then the root's `access` decides whether they are type-valid. Tagged payload
+//! declarations are intentionally rejected here.
 
 extern crate proc_macro;
 

@@ -98,7 +98,7 @@ receiving storage; no fixture is encoded through generated APIs.
 | [`tagged.rs`](../examples/tagged.rs) | Required external tag/payload coupling, selected reads, mutation, and switching (§§6.9–6.10, 7.5, 8.8, 11). |
 | [`optional.rs`](../examples/optional.rs) | Zero-sentinel optional reads, `OptionMut` updates, tri-state patches, and fresh access (§§6.5, 7.4, 8.3, 8.6, 10). |
 | [`access_errors.rs`](../examples/access_errors.rs) | Eager rejection of malformed producer bytes and structured access diagnostics (§§9, 18). |
-| [`generic_receiving_buffer.rs`](../examples/generic_receiving_buffer.rs) | Fully concrete generic roots, aligned `schema_buffer!` receiving storage, and exact access (§§6.11, 8.9, 12). |
+| [`generic_receiving_buffer.rs`](../examples/generic_receiving_buffer.rs) | Fully concrete generic roots, aligned `schema_buffer!` receiving-storage types, and exact access (§§6.11, 8.9, 12). |
 | [`no_std_wasm.rs`](../examples/no_std_wasm.rs) | Freestanding `no_std` wasm producer-byte access (§§1, 19.5). |
 
 The sources are the executable tutorial material. The remaining RFC content is
@@ -208,8 +208,8 @@ The initial design provides:
 - private `*Wire` representations formed through `zerocopy` and checked byte
   operations;
 - generated allocation-free access and mutation errors;
-- `SCHEMA_SIZE`, `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, layout metadata, and optional
-  aligned `schema_buffer!` receiving storage;
+- `SCHEMA_SIZE`, `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, layout metadata, named
+  `schema_buffer!` types, and `make_schema_buffer!` values;
 - no handwritten `unsafe` in runtime, macro crate, or emitted implementation;
   and
 - `#![no_std]` core support and C/C++ ABI verification.
@@ -351,17 +351,19 @@ requested fields or none.
 ### 4.4 Optional aligned receiving storage
 
 ```rust
-use zero_schema::schema_buffer;
+use zero_schema::{make_schema_buffer, schema_buffer};
 
-let mut slot = schema_buffer!(Message);
+type MessageBuffer = schema_buffer!(Message);
+let mut slot: MessageBuffer = make_schema_buffer!(Message);
 receive_producer_bytes(slot.as_bytes_mut())?;
 let message = Message::access(slot.as_bytes())?;
 ```
 
-`schema_buffer!(Message)` supplies correctly aligned, zero-initialized Rust
-receiving storage with exactly `Message::SCHEMA_SIZE` bytes. It performs no
-validity proof and is not a general schema initializer: callers must use
-`access` to decide whether its current bytes are valid. A schema whose complete
+`schema_buffer!(Message)` names correctly aligned Rust receiving storage with
+exactly `Message::SCHEMA_SIZE` initialized bytes; `make_schema_buffer!(Message)`
+constructs that type. Neither performs a validity proof or initializes a logical
+schema: callers must use `access` to decide whether the current bytes are valid. A
+schema whose complete
 zero bytes satisfy every declared rule (for example, an all-optional root) can
 therefore access as valid absence; other schemas still require producer data.
 
@@ -657,8 +659,9 @@ therefore fails during patch preflight rather than being normalized silently.
 
 Borrowed fields use the declaration's selected source lifetime. The emitted wire
 contains no reference or lifetime state. Type and const parameters remain only
-where layout is expressible. `schema_buffer!` requires a fully concrete root
-schema; it cannot name a tagged enum because that type has no root wire layout.
+where layout is expressible. Both receiving-storage macros require a fully
+concrete root schema; neither accepts a tagged payload because it has no root wire
+layout.
 
 ## 7. Wire layout
 
@@ -1072,11 +1075,11 @@ independent tag setter, and no operation accepting untyped payload storage.
 
 ### 8.9 Aligned receiving storage
 
-`schema_buffer!(FullyConcreteSchema)` produces public `SchemaBuffer<Wire, N>`
-byte storage whose byte view has `SCHEMA_SIZE` bytes at `SCHEMA_ALIGN`. A
-non-generic root may also receive a convenient `NameSchemaBuffer` alias. The
-macro is storage only: callers may hand its mutable bytes to an external producer
-but it never establishes type validity.
+`schema_buffer!(FullyConcreteSchema)` names the public `SchemaBuffer<Wire, N>`
+type whose byte view has `SCHEMA_SIZE` bytes at `SCHEMA_ALIGN`;
+`make_schema_buffer!(FullyConcreteSchema)` constructs an initialized value of
+that type. Callers may hand its mutable bytes to an external producer, but neither
+macro establishes type validity.
 
 ## 9. Type-validity checking
 
@@ -1226,8 +1229,8 @@ must be known before any payload view exists.
 
 Safe root access requires the actual buffer address to meet `SCHEMA_ALIGN`.
 `SCHEMA_STRIDE` is size rounded to that alignment for repeated slots.
-`schema_buffer!` can supply aligned owned receiving bytes but does not establish
-type validity.
+`schema_buffer!` names aligned owned receiving storage and `make_schema_buffer!`
+constructs it, but neither establishes type validity.
 
 ### 12.2 Field alignment
 

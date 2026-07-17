@@ -14,5 +14,6 @@ enum Payload {
 }
 
 fn main() {
-    let _ = zs::schema_buffer!(Payload);
+    type PayloadBuffer = zs::schema_buffer!(Payload);
+    let _ = core::mem::size_of::<PayloadBuffer>();
 }

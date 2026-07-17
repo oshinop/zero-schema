@@ -19,7 +19,7 @@ pub struct OptionalRoot {
 }
 
 fn main() {
-    let mut storage = zs::schema_buffer!(OptionalRoot);
+    let mut storage = zs::make_schema_buffer!(OptionalRoot);
     let mut root = OptionalRoot::access_mut(storage.as_bytes_mut()).expect("zero sentinel is valid");
     let mut maybe = root.maybe_mut();
     maybe

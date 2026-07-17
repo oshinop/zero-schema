@@ -75,7 +75,7 @@ fn release<T>(value: T) {
 }
 
 fn exercise_code8(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(CorpusCode8);
+    let mut source = zero_schema::make_schema_buffer!(CorpusCode8);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = CorpusCode8::access(source.as_bytes()) else {
         return false;
@@ -84,7 +84,7 @@ fn exercise_code8(input: &[u8]) -> bool {
     black_box(view.get());
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(CorpusCode8);
+    let mut destination = zero_schema::make_schema_buffer!(CorpusCode8);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }
@@ -107,7 +107,7 @@ fn exercise_code8(input: &[u8]) -> bool {
 }
 
 fn exercise_code16(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(CorpusCode16Be);
+    let mut source = zero_schema::make_schema_buffer!(CorpusCode16Be);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = CorpusCode16Be::access(source.as_bytes()) else {
         return false;
@@ -116,7 +116,7 @@ fn exercise_code16(input: &[u8]) -> bool {
     black_box(view.get());
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(CorpusCode16Be);
+    let mut destination = zero_schema::make_schema_buffer!(CorpusCode16Be);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }
@@ -139,7 +139,7 @@ fn exercise_code16(input: &[u8]) -> bool {
 }
 
 fn exercise_strings(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(FuzzAllStrings<'static>);
+    let mut source = zero_schema::make_schema_buffer!(FuzzAllStrings<'static>);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = FuzzAllStrings::access(source.as_bytes()) else {
         return false;
@@ -155,7 +155,7 @@ fn exercise_strings(input: &[u8]) -> bool {
     let logical = view.copy_into();
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(FuzzAllStrings<'static>);
+    let mut destination = zero_schema::make_schema_buffer!(FuzzAllStrings<'static>);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }
@@ -185,7 +185,7 @@ fn exercise_strings(input: &[u8]) -> bool {
 }
 
 fn exercise_external_union(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(ExternalCorpusMessage);
+    let mut source = zero_schema::make_schema_buffer!(ExternalCorpusMessage);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = ExternalCorpusMessage::access(source.as_bytes()) else {
         return false;
@@ -201,7 +201,7 @@ fn exercise_external_union(input: &[u8]) -> bool {
     let logical = view.copy_into();
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(ExternalCorpusMessage);
+    let mut destination = zero_schema::make_schema_buffer!(ExternalCorpusMessage);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }
@@ -236,7 +236,7 @@ fn exercise_external_union(input: &[u8]) -> bool {
 }
 
 fn exercise_record(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(AllFeatures<'static>);
+    let mut source = zero_schema::make_schema_buffer!(AllFeatures<'static>);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = AllFeatures::access(source.as_bytes()) else {
         return false;
@@ -299,7 +299,7 @@ fn exercise_record(input: &[u8]) -> bool {
     let logical = view.copy_into();
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(AllFeatures<'static>);
+    let mut destination = zero_schema::make_schema_buffer!(AllFeatures<'static>);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }
@@ -371,7 +371,7 @@ fn exercise_record(input: &[u8]) -> bool {
 /// Exercises a local zero-sentinel schema from every existing fuzz target
 /// without changing the registered deterministic corpus inventory.
 fn exercise_optional(input: &[u8]) -> bool {
-    let mut source = zero_schema::schema_buffer!(OptionalFuzzRoot);
+    let mut source = zero_schema::make_schema_buffer!(OptionalFuzzRoot);
     receive(source.as_bytes_mut(), input);
     let Ok(view) = OptionalFuzzRoot::access(source.as_bytes()) else {
         return false;
@@ -382,7 +382,7 @@ fn exercise_optional(input: &[u8]) -> bool {
     let logical = view.copy_into();
     black_box(&logical);
 
-    let mut destination = zero_schema::schema_buffer!(OptionalFuzzRoot);
+    let mut destination = zero_schema::make_schema_buffer!(OptionalFuzzRoot);
     if !duplicate(source.as_bytes(), destination.as_bytes_mut()) {
         return false;
     }

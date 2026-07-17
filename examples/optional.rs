@@ -54,7 +54,7 @@ fn field(name: &str) -> &'static FieldDescriptor {
 
 fn main() {
     let producer = ProducerSettings::reviewed_all_none();
-    let mut storage = zero_schema::schema_buffer!(Settings);
+    let mut storage = zero_schema::make_schema_buffer!(Settings);
     let mode_field = field("mode");
     let mode_span = mode_field.offset()..mode_field.offset() + mode_field.size();
     let parent_padding = (0..Settings::SCHEMA_SIZE)

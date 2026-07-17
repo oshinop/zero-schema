@@ -9,6 +9,7 @@ struct Bytes<'a, const N: usize> {
 }
 
 type FourBytes = Bytes<'static, 4>;
+type FourBytesBuffer = zero_schema::schema_buffer!(FourBytes);
 
 // Reviewed producer output for the fully concrete `Bytes<'static, 4>` root.
 const REVIEWED_PRODUCER_BYTES: [u8; 4] = [0x10, 0x20, 0x30, 0x40];
@@ -31,7 +32,7 @@ impl ProducerBytes {
 }
 
 fn main() {
-    let mut storage = zero_schema::schema_buffer!(Bytes<'static, 4>);
+    let mut storage = FourBytesBuffer::new();
     assert_eq!(
         (
             FourBytes::SCHEMA_SIZE,
@@ -89,7 +90,7 @@ fn main() {
     };
     assert_eq!(length, 4);
 
-    // `schema_buffer!` initializes aligned Rust receiving storage only. It does
+    // `schema_buffer!` names aligned Rust receiving storage only. It does
     // not construct a generic `Bytes<'static, 4>` value from schema data.
     assert_eq!(storage.as_bytes(), &[0; FourBytes::SCHEMA_SIZE]);
 

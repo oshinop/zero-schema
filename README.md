@@ -58,9 +58,24 @@ Keep these three layers separate:
    Borrowed outputs remain tied to the producer storage.
 
 Those constructors validate one exact supplied span before producing a capability. If
-a producer needs Rust-owned receiving memory, `schema_buffer!` accepts a fully
-concrete root and supplies aligned, initialized storage. Its initial bytes are **not**
-a schema initializer: let the producer fill the slot, then call `access`.
+a producer needs Rust-owned receiving memory, `schema_buffer!(Root)` names its exact
+aligned buffer type and `make_schema_buffer!(Root)` constructs an initialized value.
+Both require a fully concrete root. Initial bytes are **not** a schema initializer: let
+the producer fill the slot, then call `access`.
+
+```rust
+# use zero_schema::zero;
+# #[zero]
+# struct Message { value: u32 }
+# fn receive_producer_bytes(bytes: &mut [u8]) { bytes.copy_from_slice(&7_u32.to_ne_bytes()); }
+# fn main() {
+type MessageBuffer = zero_schema::schema_buffer!(Message);
+let mut slot: MessageBuffer = zero_schema::make_schema_buffer!(Message);
+receive_producer_bytes(slot.as_bytes_mut());
+let message = Message::access(slot.as_bytes()).unwrap();
+assert_eq!(message.value(), 7);
+# }
+```
 
 ### Read and write direction
 

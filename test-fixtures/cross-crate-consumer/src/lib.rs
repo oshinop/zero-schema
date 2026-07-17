@@ -97,7 +97,7 @@ mod private_parent {
     }
 
     pub(super) fn observation(bytes: &[u8]) -> super::Observation {
-        let mut storage = zs::schema_buffer!(PublicPrivateParent);
+        let mut storage = zs::make_schema_buffer!(PublicPrivateParent);
         storage.as_bytes_mut().copy_from_slice(bytes);
         let copied = PublicPrivateParent::access(storage.as_bytes())
             .expect("reviewed producer fixture")
@@ -179,7 +179,7 @@ pub fn composition_parent_fixture() -> &'static [u8] {
 }
 
 pub fn public_parent_from_fixture() -> Observation {
-    let mut storage = zs::schema_buffer!(PublicParent);
+    let mut storage = zs::make_schema_buffer!(PublicParent);
     storage
         .as_bytes_mut()
         .copy_from_slice(public_parent_fixture());
@@ -244,7 +244,7 @@ fn optional_observation(logical: OptionalParent) -> OptionalObservation {
 /// Proves an all-zero downstream option span materializes without exposing
 /// child support or wire projections in this public API.
 pub fn optional_parent_none_from_zeroed() -> OptionalObservation {
-    let storage = zs::schema_buffer!(OptionalParent);
+    let storage = zs::make_schema_buffer!(OptionalParent);
     optional_observation(
         OptionalParent::access(storage.as_bytes())
             .expect("zero sentinel option fields are absent")
@@ -255,7 +255,7 @@ pub fn optional_parent_none_from_zeroed() -> OptionalObservation {
 /// Exercises downstream optional mutation, nested logical patches, and a
 /// patch clear through public logical child declarations only.
 pub fn optional_parent_mutation_and_patch() -> OptionalObservation {
-    let mut storage = zs::schema_buffer!(OptionalParent);
+    let mut storage = zs::make_schema_buffer!(OptionalParent);
     {
         let mut parent = OptionalParent::access_mut(storage.as_bytes_mut())
             .expect("zero sentinel option fields are absent");
@@ -295,7 +295,7 @@ pub fn optional_parent_mutation_and_patch() -> OptionalObservation {
 }
 
 pub fn composition_from_fixture() -> (u8, u16, u8, u32) {
-    let mut storage = zs::schema_buffer!(CompositionParent);
+    let mut storage = zs::make_schema_buffer!(CompositionParent);
     storage
         .as_bytes_mut()
         .copy_from_slice(composition_parent_fixture());

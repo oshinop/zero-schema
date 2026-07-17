@@ -38,6 +38,7 @@ fn main() {
     let refreshed = AccessRecord::<'static, 2>::access(&producer).expect("valid mutation");
     assert_eq!(refreshed.copy_into().samples, [11, 12]);
 
-    let storage = zs::schema_buffer!(AccessRecord<'static, 2>);
+    type AccessBuffer = zs::schema_buffer!(AccessRecord<'static, 2>);
+    let storage = AccessBuffer::new();
     assert_eq!(storage.as_bytes().len(), AccessRecord::<'static, 2>::SCHEMA_SIZE);
 }

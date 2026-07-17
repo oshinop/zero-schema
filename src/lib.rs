@@ -31,29 +31,53 @@ pub use mutation::{BytesMut, OptionMut, ScalarMut, StringMut};
 /// Item-owning schema declaration attribute.
 pub use zero_schema_macros::zero;
 
-/// Creates initialized receiving storage for one fully concrete root schema.
+/// Names initialized receiving storage for one fully concrete root schema.
 ///
-/// The storage is aligned for the root's opaque generated wire projection and
-/// contains exactly `Root::SCHEMA_SIZE` initialized bytes. Its initial zeroes
-/// are Rust-memory initialization only; they do not imply that the bytes are a
-/// valid instance of `Root`. Populate the buffer from a producer, then call
-/// `Root::access` or `Root::access_mut` to establish validity.
+/// The resulting [`SchemaBuffer`] type is aligned for the root's opaque
+/// generated wire projection and contains exactly the root wire's initialized
+/// byte span. Supply every type and const argument, and use a concrete lifetime
+/// (such as `'static`) when one must be written.
 ///
-/// This macro accepts only a fully concrete root type. Supply every type and
-/// const argument, and use a concrete lifetime (such as `'static`) when one
-/// must be written.
+/// Construct the named type with [`SchemaBuffer::new`], [`Default::default`], or
+/// [`make_schema_buffer!`]. Initial zeroes are Rust-memory initialization only;
+/// they do not imply that the bytes are a valid instance of the root schema.
+///
+/// ```
+/// # use zero_schema::{schema_buffer, zero};
+/// # #[zero]
+/// # struct Message { value: u32 }
+/// # fn main() {
+/// type MessageBuffer = schema_buffer!(Message);
+/// let mut storage = MessageBuffer::new();
+/// # storage.as_bytes_mut().copy_from_slice(&0_u32.to_ne_bytes());
+/// let message = Message::access(storage.as_bytes()).unwrap();
+/// assert_eq!(message.value(), 0);
+/// # }
+/// ```
 #[macro_export]
 macro_rules! schema_buffer {
+    ($schema:ty) => {
+        $crate::SchemaBuffer<
+            <$schema as $crate::__private::WireType>::Wire,
+            { <$schema as $crate::__private::WireType>::SIZE },
+        >
+    };
+}
+
+/// Creates initialized receiving storage for one fully concrete root schema.
+///
+/// This is the expression counterpart to [`schema_buffer!`]. The returned value
+/// has type `schema_buffer!(Root)`. Populate its bytes from a producer, then call
+/// `Root::access` or `Root::access_mut` to establish schema validity.
+#[macro_export]
+macro_rules! make_schema_buffer {
     ($schema:ty) => {{
         const _: () = {
             assert!(<$schema>::SCHEMA_SIZE == <$schema as $crate::__private::WireType>::SIZE);
             assert!(<$schema>::SCHEMA_ALIGN == <$schema as $crate::__private::WireType>::ALIGN);
             assert!(<$schema>::SCHEMA_STRIDE == <$schema as $crate::__private::WireType>::STRIDE);
         };
-        $crate::SchemaBuffer::<
-            <$schema as $crate::__private::WireType>::Wire,
-            { <$schema>::SCHEMA_SIZE },
-        >::new()
+        <$crate::schema_buffer!($schema)>::new()
     }};
 }
 
@@ -247,7 +271,7 @@ mod tests {
 
     #[test]
     fn schema_buffer_is_initialized_storage() {
-        let mut buffer = crate::schema_buffer!(GenericSchema<u8>);
+        let mut buffer = crate::make_schema_buffer!(GenericSchema<u8>);
         assert_eq!(buffer.as_bytes(), &[0; GenericSchema::<u8>::SCHEMA_SIZE]);
         assert_eq!(buffer.as_bytes().len(), GenericSchema::<u8>::SCHEMA_SIZE);
         assert_eq!(

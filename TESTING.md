@@ -87,7 +87,7 @@ cargo +1.85.0 test --locked -p zero-schema --test <target>
 | `producer_fixture` | Independent reviewed fixture identity, alignment, hash, and nonzero ignored storage. |
 | `private_capability_safety` | Safe-code compile failures pin private proof inputs, immutable capabilities, and absence of raw aggregate wire access. |
 | `properties` | Fixed-seed arbitrary initialized bytes never panic; producer access/no-op patch stays valid. |
-| `receiving_storage` | `schema_buffer!` exact size/alignment and receiving-only semantics, including concrete generic roots. |
+| `receiving_storage` | `schema_buffer!` named types and `make_schema_buffer!` values preserve exact size/alignment and receiving-only semantics, including concrete generic roots. |
 | `roundtrip` | Producer access → logical materialization → patch → fresh access transfer contract. |
 | `scalar_cross_crate` | Scalar capabilities, metadata, and structured errors across a downstream crate. |
 | `scalar_enum` | Scalar-root exact access, closed discriminants, mutation, patch, and metadata. |
@@ -327,7 +327,7 @@ gated on declaration availability:
 | `tagged` | External-tag selection, selected materialization/mutation, rejected tag-only patches, and payload-before-tag switching. |
 | `optional` | Eligible scalar/schema/array zero sentinels, `OptionMut`, complete promotion, and tri-state patches. |
 | `access_errors` | Scalar-enum roots plus structured length, alignment, Boolean, and enum access failures. |
-| `generic_receiving_buffer` | Concrete generic `schema_buffer!` alignment, metadata, and producer-byte receipt. |
+| `generic_receiving_buffer` | Concrete generic `schema_buffer!` type naming, alignment, metadata, and producer-byte receipt. |
 | `no_std_wasm` | Freestanding core-only external-union access on `wasm32v1-none`. |
 
 ```console
@@ -350,7 +350,7 @@ only the publishable runtime and macro packages.
 Package verification checks both archives as one consumer graph. It inventories first,
 then packages the macro crate and runtime together, and finally verifies a consumer
 that directly declares `zerocopy`, imports `zero_schema::zero`, accesses producer
-bytes, materializes, mutates, and uses `schema_buffer!`:
+bytes, materializes, mutates, and uses both receiving-storage macros:
 
 ```console
 cargo +1.97.0 install --locked --version 0.20.2 cargo-deny
