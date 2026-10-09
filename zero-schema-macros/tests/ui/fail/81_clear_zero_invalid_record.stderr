@@ -1,0 +1,107 @@
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:76:12
+   |
+76 |     status.clear();
+   |            ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `StatusMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:23:1
+   |
+23 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `StatusMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:80:12
+   |
+80 |     parent.clear();
+   |            ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `ParentMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:29:1
+   |
+29 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `ParentMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:81:25
+   |
+81 |     parent.status_mut().clear();
+   |                         ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `StatusMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:23:1
+   |
+23 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `StatusMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:82:58
+   |
+82 |     parent.list_mut().get_mut(0).expect("first element").clear();
+   |                                                          ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `StatusMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:23:1
+   |
+23 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `StatusMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:86:12
+   |
+86 |     tagged.clear();
+   |            ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `TaggedMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:45:1
+   |
+45 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `TaggedMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:90:12
+   |
+90 |     tagged.clear();
+   |            ^^^^^ `clear()` is unavailable on this record
+   |
+   = help: the trait `ClearableState` is not implemented for `ZeroInvalid`
+   = note: a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero
+   = note: a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true
+   = help: the trait `ClearableState` is implemented for `ZeroValid`
+   = note: required for `Gate<'_, ZeroInvalid>` to implement `ZeroClear`
+note: required by a bound in `TaggedUnclaimedMut::<'wire>::clear`
+  --> tests/ui/fail/81_clear_zero_invalid_record.rs:66:1
+   |
+66 | #[zero(crate = zs)]
+   | ^^^^^^^^^^^^^^^^^^^ required by this bound in `TaggedUnclaimedMut::<'wire>::clear`
+   = note: this error originates in the attribute macro `zero` (in Nightly builds, run with -Z macro-backtrace for more info)

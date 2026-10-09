@@ -17,6 +17,7 @@ fn frontend_contract() {
     cases.pass("tests/ui/pass/11_symbolic_nonzero_arrays.rs");
     cases.pass("tests/ui/pass/12_string_and_nested_arrays.rs");
     cases.pass("tests/ui/pass/13_zeroed_buffer_option_fix.rs");
+    cases.pass("tests/ui/pass/14_clear_zero_valid_option_fix.rs");
 
     cases.compile_fail("tests/ui/fail/00_removed_derive.rs");
     cases.compile_fail("tests/ui/fail/01_removed_container_options.rs");
@@ -102,6 +103,8 @@ fn frontend_contract() {
     cases.compile_fail("tests/ui/fail/78_collision_access_prefix.rs");
     cases.compile_fail("tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs");
     cases.compile_fail("tests/ui/fail/80_collision_zero_is_valid.rs");
+    cases.compile_fail("tests/ui/fail/81_clear_zero_invalid_record.rs");
+    cases.compile_fail("tests/ui/fail/82_collision_clear.rs");
 }
 
 #[test]

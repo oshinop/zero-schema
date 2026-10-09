@@ -62,6 +62,30 @@ independently.
   result is documented as type-valid until its bytes are changed, so the first `access`
   or `access_mut` succeeds. They return only `SchemaBuffer` storage; `access` and
   `access_mut` remain the sole, eagerly proved route to a capability.
+- **`clear()` for zero-valid records and every string form.** Every generated record
+  mutable capability (`<Record>Mut`, whether a root, a nested record or an array element)
+  gets `pub fn clear(&mut self)`. It zero-fills exactly the record's complete declared
+  storage, the `SCHEMA_SIZE` bytes its access proof covers including its internal
+  padding, and nothing outside that span; a nested record or array element clears only
+  its own span and leaves the parent's other fields and padding alone. It reuses the
+  private-token-gated clearing path of `OptionMut::set(None)`. The method exists only
+  where an all-zero span is certainly a valid value of the record, so the result stays
+  valid: a call on any other record fails to type-check at the call site (also under
+  `cargo check`), with a `#[diagnostic::on_unimplemented]` message naming
+  `ZERO_IS_VALID` and the `Option<_>` fix (give an enum a `= 0` variant, or make the
+  field `Option<Enum>`). There is no runtime check and no panic path.
+  `StringMut::clear(&mut self)` zero-fills a string field's complete storage, including
+  any length prefix and all capacity, so the field reads back as the empty string; it is
+  available for all four string forms (`&str`, `&CStr`, `&U16Str`, `&U16CStr`), in both
+  prefix forms, and on the per-element handle of a string array. `set` is unchanged and
+  still keeps unused capacity.
+
+  The `clear()` gate is stricter than `ZERO_IS_VALID` for one construct: a record that
+  holds an externally tagged payload can be cleared only when some variant claims the
+  zero tag and every variant payload is zero-valid. `ZERO_IS_VALID` looks only at the
+  variant the zero tag selects, so a record can have `ZERO_IS_VALID == true` and still
+  not offer `clear()`; the gate cannot tell at the type level which variant a zero tag
+  picks.
 
 ### Changed
 
@@ -85,6 +109,9 @@ independently.
   diagnostic.
 - `ZERO_IS_VALID` is a reserved generated name: a record field or scalar-enum variant
   with that name is rejected with the generated-name collision diagnostic.
+- `clear` is a reserved generated name: a record field with that name is rejected with
+  the generated-name collision diagnostic, because `<Record>Mut` now has a `clear`
+  method. Rename the field, for example to `clear_flag`.
 - The doc-hidden `StringMutationAdapter` macro contract gained a required associated
   constant (`CAPACITY`) and `SharedInput`/`ExclusiveInput` gained `from_prefix`, so a
   `zero-schema-macros` expansion must be paired with the matching runtime — the exact
@@ -95,6 +122,14 @@ independently.
   `ZeroState` that gates `Option<T>` eligibility is unchanged and stays conservative for
   tagged payloads (a payload is possibly zero-valid when any variant is), whereas
   `ZERO_IS_VALID` uses the zero tag's variant.
+- The doc-hidden `WireTypeSupport` and `TaggedPayloadTypeSupport` traits gained a
+  required associated type (`ClearState`), a second sealed `ZeroState` that
+  under-approximates `ZERO_IS_VALID` and gates `clear()`: it equals `ZeroState` except
+  for a tagged payload, which is zero-valid there only when the zero tag is claimed and
+  every variant payload is. The `Option<T>` rules that read `ZeroState` are untouched.
+  The doc-hidden `Gate`, `ZeroClear`, `ClearableState`, `ZeroFlag`, and `ZeroFlagState`
+  carry the call-site bound; again the exact `=0.1.0` pair covers the new associated
+  type.
 
 ## 0.1.0
 

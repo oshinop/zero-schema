@@ -1,8 +1,8 @@
 # `zero-schema`: checked zero-copy wire capabilities
 
 **Status:** design RFC  
-**Document version:** 0.14  
-**Date:** 2026-10-08  
+**Document version:** 0.15  
+**Date:** 2026-10-09  
 **Dependency baseline:** minimum `zerocopy` 0.8.54 and `widestring` 1.2.1, as compatible-release requirements (§19.6)  
 **Supersedes for review:** the materializing v0.2 proposal, copy-interop v0.9 draft, and aggregate-copy v0.10 draft
 
@@ -605,6 +605,11 @@ doc-hidden blanket refinement `OptionalWireType: WireTypeSupport<ZeroState =
 ZeroInvalid>`; callers neither implement the marker nor receive a raw wire
 escape hatch.
 
+A second sealed calculation, `WireTypeSupport::ClearState` (and
+`TaggedPayloadTypeSupport::ClearState`), runs the same two states with the opposite
+bias and gates `clear()` (§8.4). It never feeds the Option rules above, which read only
+`ZeroState`.
+
 `#[zero(align = N)]` may raise an optional field's alignment. `capacity`,
 `len_type`, `endian`, and `tag_field` are all rejected on an `Option` field.
 The inner type supplies its own supported schema or enum representation.
@@ -794,6 +799,11 @@ there is no general raw-storage initialization route. Generic
 validation/initialization policy; optional-field storage is the documented
 exception that derives its rule from `FieldDescriptor`, not parent padding.
 
+The one clearing path is `ExclusiveInput::clear_all`, reachable only with the
+generated support token. `OptionMut::set(None)` and the record and string `clear()` of
+§8.4 all go through it, each over its own exact checked span, so none of them can
+select an arbitrary parent range.
+
 ### 7.5 External tagged-union payloads
 
 A tagged union field has this conceptual parent layout:
@@ -932,6 +942,7 @@ child from `get_mut()` lives. `set(None)` clears exactly the complete StorageWir
 span; `set(Some(value))` preflights the inner initialization before committing
 the value wire. Neither method exposes a byte slice, wire value, or initializer
 for an arbitrary root.
+`set(None)` is the same token-gated clearing path that `clear()` reuses (§7.4, §8.4).
 
 ### 8.4 Field-local mutation API
 
@@ -976,6 +987,62 @@ value with a capacity error and no setter truncates, so shortening a value to fi
 application logic. A string getter returns the borrowed `&str`, `&CStr`, `&U16Str`, or
 `&U16CStr` directly rather than a capability, so the read side exposes the same declared
 value through `LAYOUT` (`StringDescriptor::capacity()`).
+
+A string handle can also zero its own storage, and so can a record capability:
+
+```rust
+impl<'view> StringMut<'view> {
+    pub fn clear(&mut self);
+}
+
+impl<'wire> HeaderMut<'wire> {
+    // Generated for every record; callable only where the gate below holds.
+    pub fn clear(&mut self)
+    where
+        Gate<'wire, HeaderClearState>: ZeroClear; // doc-hidden, shown for shape
+}
+```
+
+`StringMut::clear` zero-fills the field's complete wire: the length prefix when the form
+has one, every unit of capacity, and any gap inside the wire. The field then reads back as
+the empty string, in all four forms and both prefix and terminated shapes, standalone or
+as an array element. It is the only operation that zeroes the tail `set` deliberately
+keeps, that is, the bytes behind the active value or behind the terminator. It cannot
+fail, and all-zero is a valid value of every bounded string, so it needs no gate.
+
+`RecordMut::clear` zero-fills exactly the record's complete declared storage: the
+`SCHEMA_SIZE` bytes its access proof covers, including the record's own internal padding,
+and nothing outside that span. A nested record or an array element holds only its own
+exact subrange, so clearing it leaves the parent's other fields and the parent's padding
+alone. The input is the capability's own checked span; neither `clear()` exposes a byte
+slice or lets the caller select a range, and neither allocates. It applies to every
+generated record capability: a root, a nested record, and a record array element.
+
+The record form exists only where an all-zero span is certainly a valid value of the
+record, so that the cleared capability remains type-valid. This is a type-level fact, not
+a runtime check: a call on any other record fails to type-check at the call site, under
+`cargo check` too, and there is no panic path. The fact is the sealed, doc-hidden
+`ClearState`, an *under*-approximation of `ZERO_IS_VALID`: `ZeroValid` there proves that
+an all-zero span is valid, and `ZeroInvalid` only says that this could not be shown. It
+composes like `ZeroState` (§6.5) for every declaration except a tagged payload. Where
+`ZeroState` takes the payload as possibly zero-valid when *any* variant is, `ClearState`
+requires some variant to claim the zero tag **and every** variant payload to be
+zero-valid; the conjunction runs over the variants instead of the disjunction. Hence
+`ClearState = ZeroValid` implies `ZERO_IS_VALID`, while the converse fails for one
+construct: a record holding a tagged payload with a zero-invalid variant can have
+`ZERO_IS_VALID == true`, because only the variant selected by tag `0` counts (§9.5), and
+still offers no `clear()`, since the gate cannot tell at the type level which variant
+the zero tag selects. A tag enum whose zero value no variant claims has
+`ZERO_IS_VALID == false` and is rejected for the same reason.
+
+The bound is written `Gate<'wire, State>: ZeroClear`, where `State` is the record's
+`ClearState` chain over its erased field types. The capability lifetime `'wire` is in the
+predicate on purpose: a false bound that names no generic parameter is a global bound,
+which rustc rejects at the method's definition and thus at the declaration of every
+non-clearable record, whereas this form is evaluated per call. The failing obligation is
+the doc-hidden leaf trait `ClearableState`, whose `#[diagnostic::on_unimplemented]`
+message names `ZERO_IS_VALID`, the `= 0` variant, and the `Option<_>` fix (§9.5 and the
+zero-start constructors). `clear` is a reserved generated name for record fields.
 
 ### 8.5 Logical aggregate movement
 
@@ -1336,6 +1403,10 @@ zero-valid does not help, and a zero tag that the payload declaration does not c
 unknown tag. This is stricter than the conservative `ZeroState` of §6.5, which
 classifies a tagged payload as possibly zero-valid when any variant is.
 
+`ClearState`, which gates `clear()` (§8.4), reads the other way: it keeps the
+tagged-payload rule above but demands that every variant payload be zero-valid, so it
+implies `ZERO_IS_VALID` and is not implied by it.
+
 A generic record's value depends on its type arguments (it composes each argument's own
 `ZERO_IS_VALID`), exactly as `SCHEMA_SIZE` does. It can therefore be named only with
 every parameter supplied, for example `Holder::<Child>::ZERO_IS_VALID`; generic code that
@@ -1451,6 +1522,12 @@ capacity, and inactive union bytes. `Option<T>` is different only for the exact
 complete field span specified in §7.4: field-local alignment and internal
 padding are presence-significant and `set(None)`/a patch clear zeroes them.
 
+`clear()` (§8.4) is the explicit way to remove such stale ignored bytes inside a span it
+owns. A record `clear()` covers the record's complete span including its internal
+padding and excludes the padding of any enclosing record, and a string `clear()` covers
+the string's whole wire including the unused capacity that `set` preserves. No ordinary
+operation requires those bytes to be zero.
+
 ### 12.4 Packed layouts
 
 Packed representations are outside the initial scope. They conflict with safe
@@ -1558,6 +1635,11 @@ representations. A union patch writes payload before its coupled external tag.
 Thus success preserves type validity and an error preserves the prior wire. A
 zero-start buffer is type-valid exactly when `ZERO_IS_VALID` holds (§9.5), and the
 constructors add no code path that yields a capability without `access`.
+
+`clear()` keeps this property by construction. The record form exists only when an
+all-zero span is certainly valid, and the string form clears a representation for which
+all-zero is always valid, so a capability that was valid before the call is valid after
+it.
 
 ## 15. Stable snapshots and concurrency
 
@@ -1840,6 +1922,13 @@ and `Option` of a string or nested array. A zero-start buffer macro applied to a
 whose enum has no `= 0` variant must fail to compile, while the `Option<Enum>` form
 compiles and runs, and `ZERO_IS_VALID` is a reserved generated name.
 
+A `clear()` call on a record whose enum field has no `= 0` variant, on a nested record
+and array element of such a record, on a record holding a tagged payload with a
+zero-invalid variant even though `ZERO_IS_VALID` is true, and on a record whose tag enum
+has an unclaimed zero tag must each fail at the call site with the `ZERO_IS_VALID`
+diagnostic, while the `Option<Enum>` form compiles and runs. `clear` is a reserved
+generated name.
+
 Union diagnostics must specifically reject every tagged-union record field that
 omits `tag_field`, names an absent sibling, names a sibling of a different scalar
 enum type, names a non-scalar-enum sibling, or shares a sibling tag with a second
@@ -1889,13 +1978,22 @@ partial absent promotion, and whole-patch atomicity. Union tests cover selected
 mutation, patch switching, payload-before-tag ordering, absence of independent
 tag mutation, and absence of raw payload access.
 
+`clear()` tests start from a valid, populated fixture whose padding is nonzero and whose
+strings were set long and then short. They require a record clear to zero its complete
+span, internal padding included, and every guard byte outside it to stay unchanged;
+a nested record and an array element to clear only their own span; a string clear to
+zero prefix, capacity, and the tail behind the terminator for each of the four forms and
+for an array element; the cleared bytes to access cleanly; and a record clear to work
+across a crate boundary and through a generic parameter.
+
 ### 20.4 Arbitrary bytes, Miri, and implementation audit
 
 Arbitrary initialized byte input must never cause undefined behavior or a panic
 through safe access; invalid input returns a structured error. Miri covers root,
 nested, array, and union access; short shared reborrows from mutable roots;
 aggregate materialization; patches; full arrays; selected-payload mutation; prefix
-access with a disjoint exclusive remainder; heap receiving storage; and
+access with a disjoint exclusive remainder; record and string `clear()`; heap receiving
+storage; and
 alignment rejection. A source audit rejects handwritten `unsafe` blocks, unsafe
 trait implementations, and unsafe operation bodies in runtime, macro crate, and
 emitted templates.
@@ -1944,6 +2042,7 @@ The initial release includes:
 - generated `Default` patches and `From<Type> for TypePatch`;
 - exact layout constants, exact zero validity, metadata, and optional aligned receiving
   storage including checked zero-start storage;
+- `clear()` for zero-valid records and for bounded strings;
 - eager safe access, `no_std`, fuzzing, Miri, and C++ layout coverage; and
 - no handwritten unsafe implementation.
 

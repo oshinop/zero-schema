@@ -1,0 +1,5 @@
+error: generated zero-schema name collision for `clear`
+ --> tests/ui/fail/82_collision_clear.rs:5:5
+  |
+5 |     clear: u8,
+  |     ^^^^^

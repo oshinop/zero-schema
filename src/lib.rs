@@ -380,6 +380,7 @@ mod tests {
     impl crate::__private::WireTypeSupport for BorrowingSchema<'_> {
         type Support = BorrowingSupport;
         type ZeroState = crate::__private::ZeroValid;
+        type ClearState = crate::__private::ZeroValid;
         const ZERO_IS_VALID: bool = true;
     }
 

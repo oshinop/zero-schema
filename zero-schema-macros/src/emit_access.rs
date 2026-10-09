@@ -163,7 +163,8 @@ pub(crate) fn emit_root_surface(
         ItemKind::TaggedEnum => unreachable!(),
     };
 
-    let zero_state = wire_type_zero_state(ir, runtime)?;
+    let zero_state = wire_type_state(ir, runtime, ZeroProjection::Zero)?;
+    let clear_state = wire_type_state(ir, runtime, ZeroProjection::Clear)?;
     let zero_is_valid = wire_type_zero_is_valid(ir, runtime)?;
     let zero_valid_const = quote!(
         /// Whether an all-zero span of exactly `SCHEMA_SIZE` bytes is a type-valid
@@ -188,6 +189,7 @@ pub(crate) fn emit_root_surface(
             impl #impl_generics #runtime::__private::WireTypeSupport for #ident #original_arguments #where_clause {
                 type Support = #module::#support #plain_arguments;
                 type ZeroState = #zero_state;
+                type ClearState = #clear_state;
                 const ZERO_IS_VALID: ::core::primitive::bool = #zero_is_valid;
             }
             #logical_schema
@@ -2096,7 +2098,36 @@ fn field_offset(ir: &SchemaIr, field: &FieldIr, runtime: &Path) -> TokenStream {
     }
 }
 
-fn wire_type_zero_state(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream> {
+/// Which of the two associated all-zero states a record composes. `ZeroState`
+/// over-approximates (it rejects `Option` inners) and `ClearState`
+/// under-approximates (it allows `clear()`); they differ only for a tagged
+/// payload.
+#[derive(Clone, Copy)]
+enum ZeroProjection {
+    Zero,
+    Clear,
+}
+
+impl ZeroProjection {
+    fn associated_type(self) -> Ident {
+        match self {
+            Self::Zero => format_ident!("ZeroState"),
+            Self::Clear => format_ident!("ClearState"),
+        }
+    }
+}
+
+/// The `ClearState` chain of a record, for the bound on its generated `clear()`.
+/// It is the same type the record publishes as `WireTypeSupport::ClearState`.
+pub(crate) fn record_clear_state(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream> {
+    wire_type_state(ir, runtime, ZeroProjection::Clear)
+}
+
+fn wire_type_state(
+    ir: &SchemaIr,
+    runtime: &Path,
+    projection: ZeroProjection,
+) -> syn::Result<TokenStream> {
     match ir.kind {
         ItemKind::ScalarEnum { .. } => {
             if ir
@@ -2110,18 +2141,20 @@ fn wire_type_zero_state(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStrea
             }
         }
         ItemKind::Struct => {
-            let mut state = quote!(#runtime::__private::ZeroValid);
+            let mut composed = quote!(#runtime::__private::ZeroValid);
             for field in ir.fields.iter().rev() {
                 let source_ty = analyze::erased_source_type(&field.ty);
-                let term = field_zero_state(&field.category, &source_ty, runtime)?;
-                state = quote!(<#term as #runtime::__private::ZeroState>::Or<#state>);
+                let term = field_state(&field.category, &source_ty, runtime, projection)?;
+                composed = quote!(<#term as #runtime::__private::ZeroState>::Or<#composed>);
             }
-            Ok(state)
+            Ok(composed)
         }
         ItemKind::TaggedEnum => unreachable!("tagged payloads do not implement WireTypeSupport"),
     }
 }
 
+/// `ZeroState` of a tagged payload: `ZeroValid` when any variant payload is
+/// zero-valid, a safe over-approximation that never looks at the external tag.
 pub(crate) fn tagged_payload_zero_state(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream> {
     let mut state = quote!(#runtime::__private::ZeroInvalid);
     for variant in &ir.variants {
@@ -2137,11 +2170,51 @@ pub(crate) fn tagged_payload_zero_state(ir: &SchemaIr, runtime: &Path) -> syn::R
     Ok(state)
 }
 
-fn field_zero_state(
+/// `ClearState` of a tagged payload, which proves the exact constant
+/// `tagged_payload_zero_is_valid` from below: the zero tag must be claimed by some
+/// variant and *every* variant payload must be zero-valid, since a type-level
+/// state cannot tell which variant the zero tag selects.
+///
+/// Whether a tag is zero is a fact about discriminants, so it enters the state
+/// protocol as a `ZeroFlag` over a constant that names no generic parameter.
+pub(crate) fn tagged_payload_clear_state(
+    ir: &SchemaIr,
+    runtime: &Path,
+) -> syn::Result<TokenStream> {
+    let claims_zero = bool_chain(
+        ir.variants
+            .iter()
+            .map(|variant| {
+                let tag = &variant.tag;
+                quote!((#tag as ::core::primitive::u64 == 0))
+            })
+            .collect(),
+        quote!(||),
+        false,
+    );
+    let mut state = quote!(
+        <#runtime::__private::ZeroFlag<{ #claims_zero }> as #runtime::__private::ZeroFlagState>::State
+    );
+    for variant in &ir.variants {
+        let term = match &variant.shape {
+            VariantShape::Unit => quote!(#runtime::__private::ZeroValid),
+            VariantShape::Newtype(ty) => {
+                let source_ty = analyze::erased_source_type(ty);
+                quote!(<#source_ty as #runtime::__private::WireTypeSupport>::ClearState)
+            }
+        };
+        state = quote!(<#term as #runtime::__private::ZeroState>::Or<#state>);
+    }
+    Ok(state)
+}
+
+fn field_state(
     category: &FieldCategory,
     support_ty: &Type,
     runtime: &Path,
+    projection: ZeroProjection,
 ) -> syn::Result<TokenStream> {
+    let state = projection.associated_type();
     match category {
         FieldCategory::Primitive(_)
         | FieldCategory::Bool
@@ -2152,10 +2225,10 @@ fn field_zero_state(
         | FieldCategory::FixedBytes { .. }
         | FieldCategory::Optional { .. } => Ok(quote!(#runtime::__private::ZeroValid)),
         FieldCategory::Path { tagged: true, .. } => {
-            Ok(quote!(<#support_ty as #runtime::__private::TaggedPayloadTypeSupport>::ZeroState))
+            Ok(quote!(<#support_ty as #runtime::__private::TaggedPayloadTypeSupport>::#state))
         }
         FieldCategory::Path { tagged: false, .. } => {
-            Ok(quote!(<#support_ty as #runtime::__private::WireTypeSupport>::ZeroState))
+            Ok(quote!(<#support_ty as #runtime::__private::WireTypeSupport>::#state))
         }
         FieldCategory::Array { element, .. } => {
             let Type::Array(array) = support_ty else {
@@ -2164,7 +2237,7 @@ fn field_zero_state(
                     "internal array support type mismatch",
                 ));
             };
-            field_zero_state(element, &array.elem, runtime)
+            field_state(element, &array.elem, runtime, projection)
         }
     }
 }

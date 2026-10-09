@@ -7,6 +7,7 @@ use crate::{
     error::{LayoutError, SchemaError},
     layout::LayoutDescriptor,
 };
+use core::marker::PhantomData;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 /// Generated capability marker required for token-gated bounded byte access.
 ///
@@ -63,20 +64,32 @@ mod zero_state_sealed {
     pub trait Sealed {}
 }
 
-/// Type-level classification used to reject `Option<T>` inners whose all-zero
-/// wire could be a valid present value.
+mod zero_clear_sealed {
+    pub trait Sealed {}
+}
+
+/// Type-level classification of an all-zero wire, read in two directions.
 ///
-/// `ZeroValid` means an all-zero wire *may* be a valid logical value and
-/// `ZeroInvalid` means it certainly cannot. For every declaration except a tagged
-/// payload the two readings coincide with the exact answer, which generated code
-/// publishes as `WireTypeSupport::ZERO_IS_VALID`; a tagged payload is classified
-/// `ZeroValid` when *any* variant payload is zero-valid, a safe over-approximation
-/// for rejecting optional inners that does not look at the external tag.
+/// `WireTypeSupport::ZeroState` rejects `Option<T>` inners whose all-zero wire
+/// could be a valid present value. `ZeroValid` means an all-zero wire *may* be a
+/// valid logical value and `ZeroInvalid` means it certainly cannot. For every
+/// declaration except a tagged payload the two readings coincide with the exact
+/// answer, which generated code publishes as `WireTypeSupport::ZERO_IS_VALID`; a
+/// tagged payload is classified `ZeroValid` when *any* variant payload is
+/// zero-valid, a safe over-approximation for rejecting optional inners that does
+/// not look at the external tag.
+///
+/// `WireTypeSupport::ClearState` gates `clear()` and has the opposite bias.
+/// `ZeroValid` means an all-zero wire is *certainly* a valid logical value and
+/// `ZeroInvalid` only means that this could not be shown. A tagged payload is
+/// `ZeroValid` there only when its zero tag is claimed and *every* variant
+/// payload is zero-valid.
 ///
 /// This is sealed so generated code can compose states but cannot define a
 /// third state outside the protocol.
 #[doc(hidden)]
 pub trait ZeroState: zero_state_sealed::Sealed {
+    /// Valid only when both operands are valid.
     type Or<Rhs: ZeroState>: ZeroState;
     /// Invalid only when both operands are invalid.
     type And<Rhs: ZeroState>: ZeroState;
@@ -110,6 +123,65 @@ pub trait OptionalWireType: WireTypeSupport<ZeroState = ZeroInvalid> {}
 
 impl<T> OptionalWireType for T where T: WireTypeSupport<ZeroState = ZeroInvalid> {}
 
+/// A [`ZeroState`] selected by a `bool` constant that names no generic parameter.
+///
+/// Whether some external tag value is zero is decided by discriminants rather than
+/// by types, so generated code lifts that one fact into the state protocol through
+/// this marker. The argument must be a braced constant expression.
+#[doc(hidden)]
+pub struct ZeroFlag<const VALID: bool>;
+
+/// The [`ZeroState`] a [`ZeroFlag`] stands for.
+#[doc(hidden)]
+pub trait ZeroFlagState {
+    type State: ZeroState;
+}
+
+impl ZeroFlagState for ZeroFlag<true> {
+    type State = ZeroValid;
+}
+
+impl ZeroFlagState for ZeroFlag<false> {
+    type State = ZeroInvalid;
+}
+
+/// A state under which an all-zero wire is certainly a valid logical value.
+///
+/// This is the leaf obligation behind generated `clear()`, and rustc reports the
+/// message on the failing leaf trait rather than the one on its parent
+/// [`ZeroClear`], so the diagnostic lives here. The macro UI fixture
+/// `81_clear_zero_invalid_record` pins its rendering.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`clear()` needs a record whose all-zero bytes are certainly valid (`ZERO_IS_VALID`), and this record's are not",
+    label = "`clear()` is unavailable on this record",
+    note = "a field with no all-zero value, for example a scalar enum without a `= 0` variant, makes `ZERO_IS_VALID` false; give the enum a zero variant or wrap the field in `Option<_>`, which is absent when all-zero",
+    note = "a record holding an externally tagged payload can be cleared only when the zero tag is claimed and every variant payload is zero-valid, even where `ZERO_IS_VALID` is true"
+)]
+pub trait ClearableState: ZeroState {}
+
+impl ClearableState for ZeroValid {}
+
+/// Carrier type for the bound on a generated record `clear()`.
+///
+/// `State` is the record's `ClearState`. The capability lifetime `'wire` is part
+/// of the type only so that the predicate `Gate<'wire, State>: ZeroClear` is not a
+/// global bound: rustc checks a false global bound at the method's definition,
+/// which would reject every non-clearable record where it is declared. With
+/// `'wire` in the predicate it is evaluated at the call site instead.
+#[doc(hidden)]
+pub struct Gate<'wire, State>(PhantomData<&'wire ()>, PhantomData<fn() -> State>);
+
+/// Proof that the state inside a [`Gate`] is [`ClearableState`].
+///
+/// Sealed: the blanket implementation below is the only one.
+#[doc(hidden)]
+pub trait ZeroClear: zero_clear_sealed::Sealed {}
+
+impl<State> zero_clear_sealed::Sealed for Gate<'_, State> {}
+
+impl<State: ClearableState> ZeroClear for Gate<'_, State> {}
+
 /// Binds a logical declaration to source-lifetime-erased generated support.
 ///
 /// This deliberately extends, rather than changes, `WireType`: wire-only
@@ -120,6 +192,17 @@ impl<T> OptionalWireType for T where T: WireTypeSupport<ZeroState = ZeroInvalid>
 pub trait WireTypeSupport: WireType {
     type Support: SchemaSupport<Wire = Self::Wire> + 'static;
     type ZeroState: ZeroState;
+
+    /// Under-approximation of [`WireTypeSupport::ZERO_IS_VALID`] used to gate
+    /// `clear()`: `ZeroValid` proves that an all-zero span is a type-valid
+    /// instance, while `ZeroInvalid` only says that this could not be shown.
+    ///
+    /// It equals [`WireTypeSupport::ZeroState`] for every declaration except a
+    /// tagged payload. A payload is `ZeroValid` here only when some variant claims
+    /// the zero tag *and* every variant payload is zero-valid, so a record that
+    /// holds a payload with one zero-invalid variant cannot be cleared even where
+    /// its `ZERO_IS_VALID` is `true`.
+    type ClearState: ZeroState;
 
     /// Exact compile-time answer to whether an all-zero span of `Self::SIZE` bytes
     /// is a type-valid instance, that is, whether the generated eager proof accepts
@@ -154,6 +237,11 @@ pub trait TaggedPayloadTypeSupport {
     type Support: for<'wire> TaggedPayloadSupport<Tag = Self::Tag, Logical<'wire> = Self::Logical<'wire>>
         + 'static;
     type ZeroState: ZeroState;
+
+    /// The [`WireTypeSupport::ClearState`] of a payload declaration: `ZeroValid`
+    /// only when the zero tag is claimed by some variant and every variant
+    /// payload is zero-valid.
+    type ClearState: ZeroState;
 
     /// Exact compile-time answer to whether an all-zero payload span, selected by
     /// an all-zero external tag, is type-valid: some variant's tag has discriminant

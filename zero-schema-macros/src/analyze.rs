@@ -1375,6 +1375,7 @@ fn validate_generated_names(
                 "LAYOUT",
                 "copy_into",
                 "copy_from",
+                "clear",
             ] {
                 reserve(name.to_owned(), Span::call_site())?;
             }

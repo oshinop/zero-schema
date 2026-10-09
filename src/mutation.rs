@@ -201,6 +201,19 @@ where
         Adapter::commit(self.input.reborrow(), value, self.token);
         Ok(())
     }
+
+    /// Zero-fills the field's complete storage, including any length prefix and
+    /// all capacity, so the field reads back as the empty string.
+    ///
+    /// This is the one operation that also clears the bytes [`StringMut::set`]
+    /// deliberately keeps: the tail behind the active value and, for a terminated
+    /// form, the bytes after the terminator. It covers this string's own storage
+    /// span only; neighbouring fields, array elements and padding are untouched.
+    /// The same method is available on the per-element handle of a string array.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.input.clear_all::<Adapter>(self.token);
+    }
 }
 
 /// A short exclusive mutation capability for one fixed byte field.

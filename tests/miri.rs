@@ -744,3 +744,100 @@ fn string_array_views_and_nested_row_handles_stay_inside_producer_storage() {
     );
     assert_eq!(storage.as_bytes(), before.as_slice());
 }
+
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ClearLeaf {
+    on: bool,
+    count: u32,
+}
+
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ClearShapes<'a> {
+    leaf: ClearLeaf,
+    leaves: [ClearLeaf; 2],
+    #[zero(capacity = 6)]
+    name: &'a CStr,
+    #[zero(capacity = 3, len_type = u8)]
+    words: [&'a str; 2],
+    level: Option<Priority>,
+}
+
+#[test]
+fn clear_stays_inside_the_proved_span_for_records_strings_and_array_elements() {
+    const SIZE: usize = ClearShapes::SCHEMA_SIZE;
+    #[repr(align(8))]
+    struct Span([u8; SIZE + 8]);
+
+    fn span_of(name: &str) -> core::ops::Range<usize> {
+        let field = ClearShapes::LAYOUT
+            .fields()
+            .iter()
+            .find(|field| field.name() == name)
+            .expect("declared field");
+        field.offset()..field.offset() + field.size()
+    }
+
+    // Applies `clear` to a fresh populated record and checks that exactly `cleared`
+    // became zero, including the guard bytes after the proved prefix.
+    fn clear_only(cleared: core::ops::Range<usize>, clear: impl FnOnce(&mut ClearShapesMut<'_>)) {
+        let mut span = Span([0xcc; SIZE + 8]);
+        span.0[..SIZE].fill(0);
+        {
+            let (mut root, rest) =
+                ClearShapes::access_mut_prefix(&mut span.0).expect("zero bytes prove");
+            assert_eq!(rest.len(), 8);
+            root.leaf_mut().on_mut().set(true).expect("bool");
+            root.leaf_mut().count_mut().set(0x0102_0304).expect("u32");
+            let mut leaves = root.leaves_mut();
+            for index in 0..2 {
+                let mut leaf = leaves.get_mut(index).expect("element");
+                leaf.on_mut().set(true).expect("bool");
+                leaf.count_mut().set(0x0506_0708).expect("u32");
+            }
+            root.name_mut().set(c"abcde").expect("fits capacity");
+            root.name_mut()
+                .set(c"a")
+                .expect("shorter value keeps the tail");
+            let mut words = root.words_mut();
+            for index in 0..2 {
+                let mut word = words.get_mut(index).expect("element");
+                word.set("abc").expect("fits capacity");
+                word.set("a").expect("shorter value keeps the tail");
+            }
+            root.level_mut().set(Some(Priority::High)).expect("present");
+        }
+        let before = span.0;
+        {
+            let (mut root, rest) =
+                ClearShapes::access_mut_prefix(&mut span.0).expect("populated root is valid");
+            assert_eq!(rest.len(), 8);
+            clear(&mut root);
+        }
+        assert!(before[cleared.clone()].iter().any(|byte| *byte != 0));
+        for (index, (new, old)) in span.0.iter().zip(before.iter()).enumerate() {
+            if cleared.contains(&index) {
+                assert_eq!(*new, 0, "byte {index} inside the cleared span");
+            } else {
+                assert_eq!(new, old, "byte {index} outside it changed");
+            }
+        }
+        ClearShapes::access(&span.0[..SIZE]).expect("a cleared span stays valid");
+    }
+
+    const { assert!(ClearShapes::ZERO_IS_VALID) };
+    clear_only(span_of("name"), |root| root.name_mut().clear());
+    let words = span_of("words");
+    let word = words.len() / 2;
+    clear_only(words.start + word..words.end, |root| {
+        root.words_mut().get_mut(1).expect("element").clear()
+    });
+    clear_only(span_of("leaf"), |root| root.leaf_mut().clear());
+    let leaves = span_of("leaves");
+    let leaf = leaves.len() / 2;
+    clear_only(leaves.start..leaves.start + leaf, |root| {
+        root.leaves_mut().get_mut(0).expect("element").clear()
+    });
+    clear_only(0..SIZE, |root| root.clear());
+}

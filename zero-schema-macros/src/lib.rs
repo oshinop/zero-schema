@@ -65,8 +65,11 @@
 //! capability/error/patch types, and a doc-hidden wire projection used only for macro
 //! composition. Capabilities expose logical getters, `copy_into`, short field-local
 //! mutation, arrays, selected external-union access, and transactional `copy_from`
-//! patches. The generated public surface does not expose a wire reference, raw byte
-//! view, pointer, or independently mutable external tag.
+//! patches. Every record mutable capability also has `clear()`, which zero-fills its
+//! complete span and, being gated at the call site on all-zero bytes being certainly
+//! valid, is unavailable on a record that is not clearable. The generated public surface
+//! does not expose a wire reference, raw byte view, pointer, or independently mutable
+//! external tag.
 //!
 //! A successful constructor has already checked representation safety and declared
 //! bounds over producer-owned initialized bytes. Generated mutation validates all

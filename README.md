@@ -139,6 +139,50 @@ assert_eq!((message.value(), rest.len()), (7, 4));
 # }
 ```
 
+### Clearing a record or a string
+
+A mutable record capability (a root, a nested record, or an array element) has
+`clear()`, and every `StringMut` has `clear()` too. `RecordMut::clear` zero-fills the
+record's complete declared storage: the `SCHEMA_SIZE` bytes its access proof covers,
+internal padding included, and nothing outside that span, so a nested record leaves its
+parent's other fields alone. `StringMut::clear` zero-fills the field's whole storage,
+length prefix and all capacity, so the field reads back as the empty string; this is what
+`set` deliberately does not do, because it keeps unused capacity. Both go through the same
+token-gated clearing path as `OptionMut::set(None)`, cannot fail, and never allocate.
+
+```rust
+# use core::ffi::CStr;
+# use zero_schema::zero;
+# #[zero]
+# #[repr(u8)]
+# #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+# enum Mode { Idle = 0, Busy = 1 }
+# #[zero]
+# struct Status<'a> { mode: Mode, count: u32, #[zero(capacity = 8)] name: &'a CStr }
+# fn main() {
+let mut slot = zero_schema::make_zeroed_schema_buffer!(Status<'static>);
+let mut status = Status::access_mut(slot.as_bytes_mut()).unwrap();
+status.mode_mut().set(Mode::Busy).unwrap();
+status.count_mut().set(7).unwrap();
+status.name_mut().set(c"engine").unwrap();
+status.name_mut().clear();
+assert_eq!((status.mode(), status.count(), status.name()), (Mode::Busy, 7, c""));
+status.clear();
+assert_eq!((status.mode(), status.count()), (Mode::Idle, 0));
+# }
+```
+
+`RecordMut::clear` exists only where an all-zero span is certainly a valid value of the
+record, so the cleared record stays valid. On any other record the call fails to type-check
+at the call site, with a diagnostic naming `ZERO_IS_VALID`; there is no runtime check and no
+panic path. The remedies are those of the zero-start constructors: declare a `= 0` variant,
+or make the field `Option<Enum>`. One construct is stricter than `ZERO_IS_VALID`: a record
+that holds an externally tagged payload is clearable only when the zero tag is claimed by a
+variant and **every** variant payload is zero-valid, because the check cannot tell at the
+type level which variant the zero tag selects. A record whose zero tag selects a zero-valid
+variant but which has another, zero-invalid variant has `ZERO_IS_VALID == true` and still
+cannot be cleared.
+
 ### Read and write direction
 
 - `view.copy_into()` moves a checked wire capability **into** a logical Rust value.

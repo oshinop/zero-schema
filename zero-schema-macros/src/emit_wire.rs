@@ -341,6 +341,7 @@ fn emit_tagged_enum(
     let logical_name = &ir.logical_name;
     let tag_type = &ir.variants[0].tag_type;
     let tagged_zero_state = crate::emit_access::tagged_payload_zero_state(ir, runtime)?;
+    let tagged_clear_state = crate::emit_access::tagged_payload_clear_state(ir, runtime)?;
     let tagged_zero_is_valid = crate::emit_access::tagged_payload_zero_is_valid(ir, runtime);
     let tagged_logical_arguments = ir
         .generics
@@ -407,6 +408,7 @@ fn emit_tagged_enum(
             type Logical<'wire> = #tagged_logical;
             type Support = #module::#support #wire_arguments;
             type ZeroState = #tagged_zero_state;
+            type ClearState = #tagged_clear_state;
             const ZERO_IS_VALID: ::core::primitive::bool = #tagged_zero_is_valid;
             const LAYOUT: &'static #runtime::LayoutDescriptor = #tagged_layout;
         }

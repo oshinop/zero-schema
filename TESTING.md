@@ -60,7 +60,7 @@ This one target runs the inline units in these source modules:
 
 ## Root integration targets
 
-Cargo metadata registers the following 25 root integration targets. Run one focused target
+Cargo metadata registers the following 26 root integration targets. Run one focused target
 with:
 
 ```console
@@ -71,6 +71,7 @@ cargo +1.85.0 test --locked -p zero-schema --test <target>
 | --- | --- |
 | `allocation` | Access, reads, arrays, selected unions, patches, and error formatting allocate zero times. |
 | `capability_access` | Reviewed bytes yield borrowed field capabilities, diagnostic metadata, short mutable reborrows, and `StringMut::capacity()` units and boundaries. |
+| `clear` | Record and string `clear()`: a record clear zeroes the complete span including internal padding and leaves guard bytes outside untouched; nested-record and array-element clears stay inside their own span; string clears zero prefix, capacity, and the tail behind the value or terminator for all four forms and an array element; and the gate admits zero-valid records across a crate boundary, through a generic parameter, and with a tagged payload whose every variant is zero-valid. |
 | `cross_crate` | Public/private composition, generic descriptors, errors, and tagged payloads across real crate boundaries. |
 | `error_paths` | Eager nested access paths retain field, index, and variant structure. |
 | `exact_span` | `access` stays exact-length for stride-sized slots; `access_prefix`/`access_mut_prefix` prove only the leading `SCHEMA_SIZE` bytes, return a disjoint remainder, and report short spans before alignment. |
@@ -80,7 +81,7 @@ cargo +1.85.0 test --locked -p zero-schema --test <target>
 | `generic_lifetime_regression` | Source-lifetime rebinding and generic nested-schema composition across a downstream crate. |
 | `invalid_bytes` | Deterministic eager rejection of invalid Boolean, enum, strings, selected payloads, and arrays while ignored storage stays irrelevant. |
 | `macro_hygiene` | Runtime-path override, raw identifiers, and shadowed-prelude expansion over producer bytes. |
-| `miri` | Focused provenance, borrow, mutation, patch, prefix-access, boxed-storage, and ignored-storage suite; execute it through Miri below. |
+| `miri` | Focused provenance, borrow, mutation, patch, prefix-access, boxed-storage, `clear()`, and ignored-storage suite; execute it through Miri below. |
 | `mutation_atomicity` | Failed field, array, tag-only, and mismatched-union preflight preserves every byte. |
 | `no_alloc` | Single-thread allocation instrumentation for core capability operations. |
 | `optional_zero_sentinel` | Zero-sentinel `Option` storage and metadata for zero-invalid enum/schema/array paths, complete-span clearing, atomic `OptionMut` and tri-state patches, and eager malformed-present diagnostics. |
@@ -108,13 +109,17 @@ cargo +1.85.0 test --locked -p zero-schema-macros --test mutation_api
 ```
 
 The macro library target covers syntax analysis and generated support. The `ui` harness
-explicitly registers 14 passing sources (`00_retained_item` through
-`13_zeroed_buffer_option_fix`) and 84 compile-fail sources, each with a reviewed
+explicitly registers 15 passing sources (`00_retained_item` through
+`14_clear_zero_valid_option_fix`) and 86 compile-fail sources, each with a reviewed
 diagnostic fixture. The failures cover removed surface requests, exact option grammar,
 invalid item/tag relationships, tagged payload root/storage attempts, zero-size and
 array restrictions, recursion, wide-string option scope, generated-name collisions
-(including `access_prefix` and `ZERO_IS_VALID`), zero-start buffers over a root whose
-enum has no `= 0` variant (the `Option<Enum>` fix passes),
+(including `access_prefix`, `ZERO_IS_VALID`, and `clear`), zero-start buffers over a root whose
+enum has no `= 0` variant (the `Option<Enum>` fix passes), `clear()` calls at the call
+site of records that are not certainly zero-valid (a plain enum field, a nested record,
+an array element, a tagged payload with a zero-invalid variant although `ZERO_IS_VALID`
+is true, and an unclaimed zero tag; the `Option<Enum>` fix, string clears, and symbolic
+array lengths pass),
 and zero-sentinel `Option` eligibility: only zero-invalid enum/schema paths and fixed
 arrays are accepted; direct primitives, Boolean, strings/bytes, tagged payloads, nested
 `Option`, element-level optional arrays, zero-valid records/scalars/tagged variants,

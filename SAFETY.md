@@ -130,6 +130,31 @@ bytes, so a wrong constant could cost a runtime `Err` but could not make an inva
 representation observable. The "valid until changed" promise ends at the first direct
 write through `SchemaBuffer::as_bytes_mut`; capability mutation preserves validity.
 
+### Clearing a record or a string
+
+`RecordMut::clear` and `StringMut::clear` reuse the private-token-gated clearing path of
+`OptionMut::set(None)`, `ExclusiveInput::clear_all`; they add no byte access of their
+own. The input is the capability's own exact checked span: a record's complete
+`SCHEMA_SIZE` bytes, internal padding included (a nested record or an array element
+holds only its own subrange, so a parent's other fields and padding are outside it), or
+a string field's complete wire including any length prefix and all capacity. Nothing
+exposes a byte slice, the operations cannot fail, and they allocate nothing.
+
+A cleared record must stay a valid capability, so the record form is a type-level
+gate rather than a runtime check. The method's `where` clause requires the record's
+`ClearState`, a second sealed `ZeroState` read as an under-approximation of
+`ZERO_IS_VALID`: it is `ZeroValid` only when all-zero bytes are certainly valid. It
+differs from `ZeroState` (which gates `Option<T>` and stays an over-approximation) in
+one place, a tagged payload, which is clearable only when the zero tag is claimed and
+*every* variant payload is zero-valid. Hence a record can have `ZERO_IS_VALID == true`
+and still not offer `clear()`; the converse cannot happen, so a wrong approximation can
+only withhold the method. The bound is spelled `Gate<'wire, _>: ZeroClear` so it mentions
+the capability lifetime: a false bound without it would be a global one, which rustc
+rejects at the record's definition, whereas this form fails at each call site with a
+`#[diagnostic::on_unimplemented]` message naming `ZERO_IS_VALID` and the `Option<_>`
+fix. All-zero is valid for every bounded string form, so `StringMut::clear` needs no
+gate.
+
 ## Borrowing and zero-copy capabilities
 
 A shared root capability is `Copy + Clone`. Its scalar getters return values and its

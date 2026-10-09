@@ -23,7 +23,46 @@ pub(crate) fn emit_record_mutation_methods(
         .filter(|field| !is_external_tag_sibling(ir, field.declaration_index))
         .map(|field| field_mutator(ir, field, runtime, support_runtime))
         .collect::<syn::Result<Vec<_>>>()?;
-    Ok(quote!(#(#methods)*))
+    let clear = record_clear_method(ir, runtime)?;
+    Ok(quote!(#(#methods)* #clear))
+}
+
+/// The record-level `clear()`. It reuses the exact-input clearing path behind
+/// `OptionMut::set(None)`, `ExclusiveInput::clear_all`, over the capability's
+/// complete proved span and keeps the generated private token gate.
+///
+/// The bound is the record's own `ClearState` chain, spelled over its erased field
+/// types exactly as `WireTypeSupport::ClearState` is, so this impl never has to
+/// name the logical record: its source-lifetime bounds are not provable here.
+/// Wrapping the chain in `Gate<'wire, _>` puts the capability lifetime into the
+/// predicate. Without it a non-clearable record would have a false global bound,
+/// which rustc rejects at the method's definition instead of at the call site.
+fn record_clear_method(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream> {
+    let support = emit_access::support_name(ir);
+    let args = emit_wire::wire_arguments(&ir.generics.original);
+    let clear_state = emit_access::record_clear_state(ir, runtime)?;
+    Ok(quote!(
+        /// Zero-fills this record's complete declared storage: all `SCHEMA_SIZE`
+        /// bytes its access proof covers, including the record's own internal
+        /// padding, and no byte outside that span. Scalars then read `0`, strings
+        /// read empty, `Option<_>` fields are absent, and nested records and array
+        /// elements are cleared with it.
+        ///
+        /// This exists only where an all-zero span is certainly a valid value of
+        /// the record, which implies `ZERO_IS_VALID`; on any other record the call
+        /// fails to compile. Wrapping a field without a zero value in `Option<_>`
+        /// makes the record clearable. A record that holds an externally tagged
+        /// payload is clearable only when the zero tag is claimed by a variant and
+        /// every variant payload is zero-valid, which is stricter than
+        /// `ZERO_IS_VALID`: that constant looks only at the variant the zero tag
+        /// selects.
+        pub fn clear(&mut self)
+        where
+            #runtime::__private::Gate<'wire, #clear_state>: #runtime::__private::ZeroClear,
+        {
+            self.input.clear_all::<#support #args>(self.token);
+        }
+    ))
 }
 
 pub(crate) fn emit_record_adapters(
