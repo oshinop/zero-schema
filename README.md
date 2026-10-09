@@ -8,7 +8,8 @@ value and treating its memory as a protocol.
 - Rust MSRV: **1.85.0**.
 - Runtime: `#![no_std]`; `alloc` and `std` are optional conveniences.
 - Default features: `std`.
-- Any crate using `#[zero]` also declares its direct `zerocopy` dependency.
+- Any crate using `#[zero]` also declares its direct `zerocopy` dependency; any
+  `zerocopy` 0.8.x release from 0.8.54 onward is supported.
 
 ## Is this the right boundary?
 
@@ -30,8 +31,14 @@ Add the runtime and direct `zerocopy` dependency required by generated private w
 ```toml
 [dependencies]
 zero-schema = "=0.1.0"
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 ```
+
+`zerocopy` (and the runtime's `widestring`) are compatible-release requirements, not
+exact pins: Cargo resolves the runtime and your direct `zerocopy` dependency to one
+release, so a later 0.8.x such as 0.8.61 works. Only the companion
+`zero-schema-macros` crate is pinned (`=0.1.0`), so the runtime and its expansion
+always move together.
 
 Then run the assertion-driven [`records.rs`](examples/records.rs) example:
 
@@ -57,11 +64,18 @@ Keep these three layers separate:
    `Record::access_mut` yields an exclusive `RecordMut<'_>` for constrained mutation.
    Borrowed outputs remain tied to the producer storage.
 
-Those constructors validate one exact supplied span before producing a capability. If
-a producer needs Rust-owned receiving memory, `schema_buffer!(Root)` names its exact
-aligned buffer type and `make_schema_buffer!(Root)` constructs an initialized value.
-Both require a fully concrete root. Initial bytes are **not** a schema initializer: let
-the producer fill the slot, then call `access`.
+Those constructors validate one exact supplied span before producing a capability. When
+the span you hold is longer than the schema (for example a union-sized payload span),
+`Record::access_prefix` and `Record::access_mut_prefix` prove exactly the leading
+`SCHEMA_SIZE` bytes with the same alignment rule and eager proof and return the
+remainder untouched. If a producer needs Rust-owned receiving memory,
+`schema_buffer!(Root)` names its exact aligned buffer type and
+`make_schema_buffer!(Root)` constructs an initialized value; with the `alloc` feature,
+`make_boxed_schema_buffer!(Root)` builds the same zero-filled buffer directly on the
+heap as a `Box`, with no stack temporary, for large roots. All of them require a fully
+concrete root. Those initial bytes are **not** a schema initializer: let the producer
+fill the slot, then call `access`. A root whose all-zero bytes are already a valid
+instance can say so instead; see the zero-start constructors below.
 
 ```rust
 # use zero_schema::zero;
@@ -77,6 +91,54 @@ assert_eq!(message.value(), 7);
 # }
 ```
 
+### Starting from zero, checked at compile time
+
+Every generated record and scalar enum has a `const ZERO_IS_VALID: bool`: exactly
+whether an all-zero span is accepted by `access`. Primitives, `bool`, fixed bytes, every
+bounded string form, and `Option<T>` are always zero-valid; a scalar enum needs a
+`= 0` variant; nested schemas and fixed arrays take their element's value; a tagged
+union needs the variant selected by tag `0` to be zero-valid.
+`make_zeroed_schema_buffer!(Root)` (and, with `alloc`,
+`make_zeroed_boxed_schema_buffer!(Root)`) require that constant at compile time and
+otherwise build the same buffer as `make_schema_buffer!`, which is type-valid until its
+bytes are changed. `access` and `access_mut` stay the only way to get a capability:
+they still prove the zero bytes, and there is no unchecked variant.
+
+```rust
+# use zero_schema::zero;
+# #[zero]
+# #[repr(u8)]
+# #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+# enum Mode { Idle = 0, Busy = 1 }
+# #[zero]
+# struct Status { mode: Mode, count: u32 }
+# fn main() {
+const { assert!(Status::ZERO_IS_VALID) };
+let slot = zero_schema::make_zeroed_schema_buffer!(Status);
+let status = Status::access(slot.as_bytes()).unwrap();
+assert_eq!((status.mode(), status.count()), (Mode::Idle, 0));
+# }
+```
+
+An enum without a `= 0` discriminant makes its root zero-invalid, and the macro then
+fails to compile with a message naming `ZERO_IS_VALID`. Declare a zero variant, or make the
+field `Option<Enum>`, whose all-zero span is `None`. For a generic root, the constant
+depends on its type arguments, so name it with every parameter supplied.
+
+```rust
+# use zero_schema::zero;
+# #[zero]
+# struct Message { value: u32 }
+# fn main() {
+#[repr(align(4))]
+struct Span([u8; 8]);
+let mut span = Span([0; 8]);
+span.0[..4].copy_from_slice(&7_u32.to_ne_bytes());
+let (message, rest) = Message::access_prefix(&span.0).unwrap();
+assert_eq!((message.value(), rest.len()), (7, 4));
+# }
+```
+
 ### Read and write direction
 
 - `view.copy_into()` moves a checked wire capability **into** a logical Rust value.
@@ -88,7 +150,14 @@ reborrow, so sequential updates are possible without handing out a mutable aggre
 or its raw storage. See [`SAFETY.md`](SAFETY.md) for the borrowing, receiving-storage,
 and mutation invariants.
 
-### Two representation rules worth finding early
+A bounded-string handle (`*_mut()` on a `str`, `CStr`, `U16Str`, or `U16CStr` field, or an
+element of a string array) also
+reports its declared `#[zero(capacity = N)]` through read-only `capacity()`: bytes for
+`str` and `CStr`, `u16` units for the wide forms, counting the terminator for the C forms
+and excluding the length prefix for the prefixed forms. It is metadata only; `set`
+rejects an overlong value and no setter truncates.
+
+### Three representation rules worth finding early
 
 - **`Option<T>` is a zero sentinel.** There is no presence byte: `None` is an all-zero
   complete field span, and only types for which zero cannot be a valid present value
@@ -100,6 +169,11 @@ and mutation invariants.
   change the tag separately from the payload. The [`tagged.rs`](examples/tagged.rs)
   tour demonstrates the coupled switch; the normative model is in the
   [design RFC](docs/zero-schema-design-rfc.md).
+- **Arrays may hold bounded strings or other arrays.** `[&U16CStr; 4]` with
+  `#[zero(capacity = 49)]` is the C++ `wchar_t names[4][49]` (16-bit `wchar_t`), and
+  `[[u16; 49]; 4]` is `uint16_t grid[4][49]`. Strings stay zero-copy per element,
+  a row is an `ArrayRef`/`ArrayMut` view, and errors name every index (`names[2]`,
+  `grid[1][3]`). See the [design RFC §6.7](docs/zero-schema-design-rfc.md#67-fixed-arrays).
 
 ## Follow the runnable examples
 
@@ -122,9 +196,10 @@ other tours do not need it. [`examples/README.md`](examples/README.md) is a
 topic-indexed companion rather than this staged learning path.
 
 For an ABI review, generated roots expose `SCHEMA_SIZE`, `SCHEMA_ALIGN`,
-`SCHEMA_STRIDE`, and diagnostic `LAYOUT` metadata; [`records.rs`](examples/records.rs)
-and [`generic_receiving_buffer.rs`](examples/generic_receiving_buffer.rs) assert those
-facts. A C/C++ producer still needs an agreed target ABI and reviewed fixtures. The
+`SCHEMA_STRIDE`, and diagnostic `LAYOUT` metadata;
+[`records.rs`](examples/records.rs) and
+[`generic_receiving_buffer.rs`](examples/generic_receiving_buffer.rs) assert the
+layout facts. A C/C++ producer still needs an agreed target ABI and reviewed fixtures. The
 [`TESTING.md` C++ conformance section](TESTING.md#c-conformance-and-reviewed-fixtures)
 covers the cross-language evidence; the [design RFC](docs/zero-schema-design-rfc.md)
 defines the compatibility contract.
@@ -133,7 +208,7 @@ defines the compatibility contract.
 
 | Feature | Purpose |
 | --- | --- |
-| `alloc` | Enables owned error-path formatting. |
+| `alloc` | Enables owned error-path formatting and heap receiving storage (`SchemaBuffer::new_boxed`, `make_boxed_schema_buffer!`, `make_zeroed_boxed_schema_buffer!`). |
 | `std` | Enables `alloc` and `zerocopy` standard-library integration. |
 
 For a `no_std` schema crate, disable defaults. `#[zero]` is re-exported
@@ -142,7 +217,7 @@ unconditionally, so this keeps both `std` and `alloc` disabled:
 ```toml
 [dependencies]
 zero-schema = { version = "=0.1.0", default-features = false }
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 ```
 
 The [`no_std_wasm.rs`](examples/no_std_wasm.rs) command above is a compile/link proof,

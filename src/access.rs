@@ -5,7 +5,7 @@
 
 use core::{marker::PhantomData, mem};
 
-use zerocopy::{FromBytes, Immutable, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, KnownLayout};
 
 use crate::{
     __private::{InputAccess, RootInputAccess},
@@ -21,7 +21,17 @@ use crate::{
 /// Those bytes have no schema interpretation: callers must let the root's
 /// `access` or `access_mut` operation establish type validity after a producer has
 /// populated the storage.
+///
+/// Whether the zero fill happens to be a valid instance is a property of the root:
+/// its generated `ZERO_IS_VALID` constant. `make_zeroed_schema_buffer!` (and, under
+/// `alloc`, `make_zeroed_boxed_schema_buffer!`) construct this storage only for
+/// roots where that constant is `true`; `access` still performs the proof.
+///
+/// [`SchemaBuffer::new`] builds the value inline. Under the `alloc` feature,
+/// `SchemaBuffer::new_boxed` builds the same zero-filled value directly on the
+/// heap, which suits roots too large to keep comfortably on a stack.
 #[repr(C)]
+#[derive(FromZeros)]
 pub struct SchemaBuffer<W, const N: usize> {
     _align: [W; 0],
     bytes: [u8; N],
@@ -49,6 +59,35 @@ impl<W, const N: usize> SchemaBuffer<W, N> {
     #[inline]
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         &mut self.bytes
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<W, const N: usize> SchemaBuffer<W, N>
+where
+    Self: FromZeros,
+{
+    /// Creates zero-filled receiving storage directly on the heap.
+    ///
+    /// This is [`SchemaBuffer::new`] with heap placement: the buffer is allocated
+    /// already zeroed, so no temporary of `N` bytes is ever formed on the stack.
+    /// The bytes carry the same meaning as [`SchemaBuffer::new`]: initialized
+    /// Rust memory only, with no implied schema validity until a producer fills
+    /// them and the root's `access` or `access_mut` proves them.
+    ///
+    /// The allocation is aligned for `W` exactly like the inline buffer. An
+    /// allocation failure is reported like `Box::new` reports it, through the
+    /// global allocation-error handler.
+    ///
+    /// This constructor is available for the opaque generated wire projections
+    /// named by `schema_buffer!`, which are all-bit-valid and therefore
+    /// zero-initializable.
+    #[inline]
+    pub fn new_boxed() -> alloc::boxed::Box<Self> {
+        match Self::new_box_zeroed() {
+            Ok(storage) => storage,
+            Err(_) => alloc::alloc::handle_alloc_error(core::alloc::Layout::new::<Self>()),
+        }
     }
 }
 
@@ -169,6 +208,24 @@ where
     #[inline]
     pub fn from_exact(bytes: &'bytes [u8], _: W::Token) -> Result<Self, LayoutError> {
         Self::from_checked(bytes)
+    }
+
+    /// Checks the leading generated root wire span of a possibly longer slice and
+    /// returns the bytes after it. Fewer than `size_of::<W>()` bytes fail before
+    /// any alignment test; the remainder is neither inspected nor retained as part
+    /// of the proof.
+    #[doc(hidden)]
+    #[inline]
+    pub fn from_prefix(
+        bytes: &'bytes [u8],
+        _: W::Token,
+    ) -> Result<(Self, &'bytes [u8]), LayoutError> {
+        let required = mem::size_of::<W>();
+        let actual = bytes.len();
+        let (prefix, remainder) = bytes
+            .split_at_checked(required)
+            .ok_or(LayoutError::InsufficientBytes { required, actual })?;
+        Ok((Self::from_checked(prefix)?, remainder))
     }
 }
 
@@ -300,6 +357,24 @@ where
     #[inline]
     pub fn from_exact(bytes: &'bytes mut [u8], _: W::Token) -> Result<Self, LayoutError> {
         Self::from_checked(bytes)
+    }
+
+    /// Checks the leading generated root wire span of a possibly longer slice and
+    /// returns the disjoint exclusive bytes after it. Fewer than `size_of::<W>()`
+    /// bytes fail before any alignment test; the remainder is neither inspected
+    /// nor part of the proof.
+    #[doc(hidden)]
+    #[inline]
+    pub fn from_prefix(
+        bytes: &'bytes mut [u8],
+        _: W::Token,
+    ) -> Result<(Self, &'bytes mut [u8]), LayoutError> {
+        let required = mem::size_of::<W>();
+        let actual = bytes.len();
+        let (prefix, remainder) = bytes
+            .split_at_mut_checked(required)
+            .ok_or(LayoutError::InsufficientBytes { required, actual })?;
+        Ok((Self::from_checked(prefix)?, remainder))
     }
 }
 

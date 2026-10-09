@@ -220,6 +220,13 @@ fn main() {
     {
         let mut view = BorrowedForms::access_mut(&mut rejected.bytes)
             .expect("reviewed producer bytes remain valid for mutation");
+        // Declared capacity is read-only metadata in each field's storage units:
+        // bytes for `str`/`CStr`, `u16` units for the wide forms. The C forms count
+        // their terminator; the length-prefixed forms exclude their prefix.
+        assert_eq!(view.text_mut().capacity(), 5);
+        assert_eq!(view.c_text_mut().capacity(), 5);
+        assert_eq!(view.wide_text_mut().capacity(), 3);
+        assert_eq!(view.wide_c_text_mut().capacity(), 3);
         let error = view
             .text_mut()
             .set("too-long")

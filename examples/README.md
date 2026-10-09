@@ -31,7 +31,9 @@ cargo +1.85.0 run --locked --example records
 ### 2. Strings and endian fields — [`strings.rs`](strings.rs)
 
 This tour asserts four borrowed string forms, a borrowed fixed-byte array, an explicitly
-big-endian scalar, and preservation of inactive string capacity and padding. It then
+big-endian scalar, and preservation of inactive string capacity and padding. It reports
+each field's declared capacity through read-only `StringMut::capacity()` (storage units;
+terminator counted for C forms, length prefix excluded for prefixed forms). It then
 proves that an over-capacity update fails byte-for-byte without changing the producer
 fixture.
 
@@ -133,7 +135,7 @@ in the consuming crate:
 ```toml
 [dependencies]
 zero-schema = "=0.1.0"
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 ```
 
 For a core-only consumer, disable runtime defaults. `#[zero]` remains available
@@ -142,7 +144,7 @@ because it is re-exported unconditionally:
 ```toml
 [dependencies]
 zero-schema = { version = "=0.1.0", default-features = false }
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 ```
 
 ## Where to go next

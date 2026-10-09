@@ -208,10 +208,16 @@ fn field_mutator(
             let support_element = &support_array.elem;
             let wire =
                 emit_wire::wire_type(element, support_element, support_runtime, field.wire_endian)?;
-            let logical = array_logical_type(ir, element, &array.elem, runtime, quote!('view));
             let n = emit_wire::array_length(&field.support_ty)?;
             let adapter = array_adapter_name(field);
             let args = emit_wire::wire_arguments(&ir.generics.original);
+            let logical = emit_access::array_logical_type(
+                element,
+                &array.elem,
+                runtime,
+                quote!('view),
+                &quote!(#adapter #args),
+            );
             Ok(quote!(
                 pub fn #method<'view>(&'view mut self) -> #runtime::ArrayMut<'view, #logical, #n, #adapter #args> {
                     let input = match self.input.subrange_mut::<[#wire; #n]>(#offset) {
@@ -330,10 +336,22 @@ fn option_field_adapter(
                 )?;
                 let length = emit_wire::array_length(inner_support_ty)?;
                 let array_adapter = array_adapter_name(field);
-                let read = array_logical_type(ir, element, &array.elem, runtime, quote!('wire));
-                let validation_read =
-                    array_logical_type(ir, element, &array.elem, runtime, quote!('_));
-                let value = array_value_type(ir, element, &array.elem, quote!(#source));
+                let adapter_ty = quote!(#array_adapter #plain_args);
+                let read = emit_access::array_logical_type(
+                    element,
+                    &array.elem,
+                    runtime,
+                    quote!('wire),
+                    &adapter_ty,
+                );
+                let validation_read = emit_access::array_logical_type(
+                    element,
+                    &array.elem,
+                    runtime,
+                    quote!('_),
+                    &adapter_ty,
+                );
+                let value = array_value_type(ir, runtime, element, &array.elem, quote!(#source));
                 let array_value = quote!([#value; #length]);
                 let offset = quote!(#runtime::__private::checked_element_offset(index, <#array_adapter #plain_args as #runtime::__private::ArrayElementAdapter>::STRIDE));
                 (
@@ -460,6 +478,7 @@ fn field_adapter(
                 &plain_generics,
                 &plain_args,
                 &support_where,
+                *capacity,
                 quote!(
                     let prefix = input.subrange_bytes::<Self>(<Self::Wire>::LEN_OFFSET, <#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH, __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
                     let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity, __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
@@ -488,6 +507,7 @@ fn field_adapter(
                 &plain_generics,
                 &plain_args,
                 &support_where,
+                *capacity,
                 quote!(
                     let data = input.subrange_bytes::<Self>(0, #capacity, __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
                     #runtime::__private::preflight_c_str(data, value).map_err(|error| #mutation::field(#field_name, error))
@@ -518,6 +538,7 @@ fn field_adapter(
                 &plain_generics,
                 &plain_args,
                 &support_where,
+                *capacity,
                 quote!(
                     let prefix = input.subrange_bytes::<Self>(<Self::Wire>::LEN_OFFSET, <#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH, __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
                     let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity * ::core::mem::size_of::<::core::primitive::u16>(), __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
@@ -546,6 +567,7 @@ fn field_adapter(
                 &plain_generics,
                 &plain_args,
                 &support_where,
+                *capacity,
                 quote!(
                     let data = input.subrange_bytes::<Self>(0, #capacity * ::core::mem::size_of::<::core::primitive::u16>(), __ZeroSchemaInputAccessToken { _private: () }).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout)?;
                     #runtime::__private::preflight_u16_c_str(data, value).map_err(|error| #mutation::field(#field_name, error))
@@ -589,6 +611,7 @@ fn string_adapter_tokens(
     plain_generics: &TokenStream,
     plain_args: &TokenStream,
     support_where: &TokenStream,
+    capacity: usize,
     preflight: TokenStream,
     commit: TokenStream,
     read: TokenStream,
@@ -600,6 +623,7 @@ fn string_adapter_tokens(
             type Wire = #wire;
             type Owner = #owner #plain_args;
             type Logical = #logical;
+            const CAPACITY: usize = #capacity;
             fn read<'wire>(input: #runtime::__private::SharedInput<'wire, Self::Wire>) -> ::core::result::Result<&'wire Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { #read }
             fn preflight(input: #runtime::__private::SharedInput<'_, Self::Wire>, value: &Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { #preflight }
             fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: &Self::Logical, token: Self::Token) { #commit }
@@ -647,146 +671,278 @@ fn emit_array_adapter(
     runtime: &Path,
     support_runtime: &Path,
 ) -> syn::Result<TokenStream> {
-    let FieldCategory::Array { element, .. } = &field.category else {
-        unreachable!()
+    let Some((leaf, depth)) = field.category.array_leaf() else {
+        unreachable!("array adapters are emitted only for array fields")
     };
-    let Type::Array(array) = &field.ty else {
-        return Err(syn::Error::new_spanned(&field.ty, "array type mismatch"));
+    let leaf = leaf.clone();
+    let leaf_ty = emit_access::array_leaf_type(&field.ty);
+    let support_leaf_ty = analyze::support_type(leaf_ty);
+    // Array lengths from the outermost level down. The last one is the leaf
+    // array; the leaf adapter uses them to turn a flat position back into the
+    // full index path of a failing element.
+    let dims = emit_access::array_dims(&field.support_ty);
+    let alias = array_adapter_name(field);
+    let adapter = if depth == 1 {
+        alias.clone()
+    } else {
+        array_leaf_adapter_name(field)
     };
-    let adapter = array_adapter_name(field);
     let scalar_adapter = array_scalar_adapter_name(field);
+    let string_adapter = array_string_adapter_name(field);
     let plain_generics = emit_wire::wire_generics(&ir.generics.original);
     let plain_args = emit_wire::wire_arguments(&ir.generics.original);
-    let element_wire = emit_wire::wire_type(
-        element,
-        &analyze::support_type(&array.elem),
-        support_runtime,
-        field.wire_endian,
-    )?;
-    let read = array_logical_type(ir, element, &array.elem, runtime, quote!('wire));
-    let value = array_value_type(ir, element, &array.elem, quote!('value));
+    let element_wire =
+        emit_wire::wire_type(&leaf, &support_leaf_ty, support_runtime, field.wire_endian)?;
+    let adapter_ty = quote!(#adapter #plain_args);
+    let read = emit_access::array_logical_type(&leaf, leaf_ty, runtime, quote!('wire), &adapter_ty);
+    let value = array_value_type(ir, runtime, &leaf, leaf_ty, quote!('value));
     let owner = emit_access::owner_name(ir);
     let access_error = &ir.names.access_error;
     let mutation = &ir.names.mutation_error;
     let field_name = &field.logical_name;
     let support_where = array_adapter_support_where(ir, field, runtime);
-    let proof = match element.as_ref() {
-        FieldCategory::Primitive(_) => quote!(Ok(())),
+    let flat = quote!(index);
+    let first = quote!(0usize);
+    // Mutation error for a failing element at flat position `index`. A plain
+    // array reports `field[index]`; a nested array reports `field[i][j]..`.
+    let mutation_array = |kind: TokenStream| -> TokenStream {
+        if depth == 1 {
+            quote!(#mutation::array(#field_name, index, #kind))
+        } else {
+            let constructor = format_ident!("array_path{}", depth);
+            let path = emit_access::index_path_array(&dims, &flat);
+            quote!(#mutation::#constructor(#field_name, #path, #kind))
+        }
+    };
+    let access_layout = quote!(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout);
+    // Bounded string leaves: whole-array operations know the element position
+    // and report it; the per-element `StringMut` handle owns only its string,
+    // exactly like a string field handle, so it reports field-level failures.
+    let string_ops = if leaf.is_string() {
+        let variant = emit_access::error_array_string_variant(field);
+        let inner = emit_access::error_array_string_error_type(field);
+        let at_position = |position: &TokenStream, kind: TokenStream| {
+            let path = emit_access::index_path_error(
+                runtime,
+                &dims,
+                position,
+                |innermost| quote!(#inner { index: #innermost, kind: #kind }),
+            );
+            quote!(#access_error::#variant(#path))
+        };
+        let element = string_element_ops(
+            &leaf,
+            runtime,
+            &|error| mutation_array(quote!(__zero_schema_string_kind(#error))),
+            &|kind| at_position(&flat, kind),
+        )?;
+        let handle = string_element_ops(
+            &leaf,
+            runtime,
+            &|error| quote!(#mutation::field(#field_name, #error)),
+            &|kind| at_position(&first, kind),
+        )?;
+        Some((element, handle))
+    } else {
+        None
+    };
+    let (proof, read_expr) = match &leaf {
+        FieldCategory::Primitive(_) => (
+            quote!(Ok(())),
+            quote!(input.read_copy::<Self::Wire>(0).map(|wire| wire.get()).map_err(#access_layout)),
+        ),
         FieldCategory::Bool => {
             let variant = emit_access::error_array_bool_variant(field);
             let inner = emit_access::error_array_bool_error_type(field);
-            quote!({ let wire=input.read_copy::<Self::Wire>(0).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout)?; if wire.decode().is_some() { Ok(()) } else { Err(#access_error::#variant(#inner { index, raw: wire.raw() })) } })
+            let path = emit_access::index_path_error(
+                runtime,
+                &dims,
+                &flat,
+                |innermost| quote!(#inner { index: #innermost, raw: wire.raw() }),
+            );
+            (
+                quote!({ let wire=input.read_copy::<Self::Wire>(0).map_err(#access_layout)?; if wire.decode().is_some() { Ok(()) } else { Err(#access_error::#variant(#path)) } }),
+                quote!({ let wire=input.read_copy::<Self::Wire>(0).map_err(#access_layout)?; wire.decode().ok_or(#access_error::#variant(#path)) }),
+            )
         }
         FieldCategory::Path { .. } => {
-            let ty = analyze::support_type(&array.elem);
+            let ty = &support_leaf_ty;
             let variant = emit_access::error_array_child_variant(field);
             let inner = emit_access::error_array_child_error_type(field);
-            quote!(<#ty as #runtime::__private::WireTypeSupport>::Support::prove(input).map(|_| ()).map_err(|source| #access_error::#variant(#inner { index, source })))
+            let path = emit_access::index_path_error(
+                runtime,
+                &dims,
+                &flat,
+                |innermost| quote!(#inner { index: #innermost, source }),
+            );
+            (
+                quote!(<#ty as #runtime::__private::WireTypeSupport>::Support::prove(input).map(|_| ()).map_err(|source| #access_error::#variant(#path))),
+                quote!(match <#ty as #runtime::__private::WireTypeSupport>::Support::prove(input) { Ok(proof) => Ok(<#ty as #runtime::__private::WireTypeSupport>::Support::make_ref(proof)), Err(source) => Err(#access_error::#variant(#path)) }),
+            )
+        }
+        string if string.is_string() => {
+            let (element, _) = string_ops.as_ref().expect("string leaf operations");
+            let string_read = &element.read;
+            (quote!((#string_read).map(|_| ())), quote!(#string_read))
         }
         _ => return Err(syn::Error::new_spanned(&field.ty, "invalid array element")),
     };
-    let read_expr = match element.as_ref() {
+    let (mut_ty, make_mut, preflight, commit, preflight_init, commit_init, extra) = match &leaf {
         FieldCategory::Primitive(_) => {
-            quote!(input.read_copy::<Self::Wire>(0).map(|wire| wire.get()).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout))
+            let ty = leaf_ty;
+            let commit = quote!({
+                let bytes = match input.subrange_bytes_mut::<Self>(
+                    0,
+                    ::core::mem::size_of::<Self::Wire>(),
+                    token,
+                ) {
+                    Ok(bytes) => bytes,
+                    Err(_) => unreachable!("preflighted array scalar remains exact"),
+                };
+                Self::Wire::new(*value).store_preflighted(bytes);
+            });
+            (
+                quote!(#runtime::ScalarMut<'wire, #ty, #scalar_adapter #plain_args>),
+                quote!(#runtime::ScalarMut::prove(input, token)),
+                quote!(Ok(())),
+                commit.clone(),
+                quote!(Ok(())),
+                commit,
+                quote!(
+                    pub struct #scalar_adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
+                    impl #plain_generics #runtime::__private::InputAccess for #scalar_adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
+                    impl #plain_generics #runtime::__private::ScalarMutationAdapter for #scalar_adapter #plain_args #support_where {
+                        type Wire = #element_wire; type Owner = #owner #plain_args; type Logical = #ty;
+                        fn read(input: #runtime::__private::SharedInput<'_, Self::Wire>) -> ::core::result::Result<Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { input.read_copy::<Self::Wire>(0).map(|wire| wire.get()).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout) }
+                        fn preflight(_: Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { Ok(()) }
+                        fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: Self::Logical, token: Self::Token) { let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array scalar remains exact") }; Self::Wire::new(value).store_preflighted(bytes); }
+                    }
+                ),
+            )
         }
         FieldCategory::Bool => {
             let variant = emit_access::error_array_bool_variant(field);
             let inner = emit_access::error_array_bool_error_type(field);
-            quote!({ let wire=input.read_copy::<Self::Wire>(0).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout)?; wire.decode().ok_or(#access_error::#variant(#inner { index, raw: wire.raw() })) })
+            let commit = quote!({ let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array Boolean remains exact") }; #runtime::__private::BoolWire::store_preflighted(*value, bytes); });
+            // The standalone scalar handle has no array position of its own.
+            let scalar_path = emit_access::index_path_error(
+                runtime,
+                &dims,
+                &first,
+                |innermost| quote!(#inner { index: #innermost, raw: wire.raw() }),
+            );
+            (
+                quote!(#runtime::ScalarMut<'wire, bool, #scalar_adapter #plain_args>),
+                quote!(#runtime::ScalarMut::prove(input, token)),
+                quote!(Ok(())),
+                commit.clone(),
+                quote!(Ok(())),
+                commit,
+                quote!(
+                    pub struct #scalar_adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
+                    impl #plain_generics #runtime::__private::InputAccess for #scalar_adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
+                    impl #plain_generics #runtime::__private::ScalarMutationAdapter for #scalar_adapter #plain_args #support_where {
+                        type Wire = #element_wire; type Owner = #owner #plain_args; type Logical = bool;
+                        fn read(input: #runtime::__private::SharedInput<'_, Self::Wire>) -> ::core::result::Result<Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { let wire=input.read_copy::<Self::Wire>(0).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout)?; wire.decode().ok_or(#access_error::#variant(#scalar_path)) }
+                        fn preflight(_: Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { Ok(()) }
+                        fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: Self::Logical, token: Self::Token) { let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array Boolean remains exact") }; #runtime::__private::BoolWire::store_preflighted(value, bytes); }
+                    }
+                ),
+            )
         }
         FieldCategory::Path { .. } => {
-            let ty = analyze::support_type(&array.elem);
+            let ty = &support_leaf_ty;
+            let child_support = quote!(<#ty as #runtime::__private::WireTypeSupport>::Support);
             let variant = emit_access::error_array_child_variant(field);
             let inner = emit_access::error_array_child_error_type(field);
-            quote!(match <#ty as #runtime::__private::WireTypeSupport>::Support::prove(input) { Ok(proof) => Ok(<#ty as #runtime::__private::WireTypeSupport>::Support::make_ref(proof)), Err(source) => Err(#access_error::#variant(#inner { index, source })) })
+            let path = emit_access::index_path_error(
+                runtime,
+                &dims,
+                &flat,
+                |innermost| quote!(#inner { index: #innermost, source }),
+            );
+            let capacity = mutation_array(quote!(#runtime::ErrorKind::CapacityExceeded));
+            (
+                quote!(<#child_support as #runtime::__private::SchemaSupport>::Mut<'wire>),
+                quote!(match <#child_support as #runtime::__private::SchemaSupport>::prove_mut(input) { Ok(proof) => Ok(<#child_support as #runtime::__private::SchemaSupport>::make_mut(proof)), Err(source) => Err(#access_error::#variant(#path)) }),
+                quote!(<#child_support as #runtime::__private::SchemaLogicalMutation<#value>>::preflight_logical(input, value).map_err(|_| #capacity)),
+                quote!({ let child_token = <#child_support as #runtime::__private::SchemaSupport>::input_token(&input); <#child_support as #runtime::__private::SchemaLogicalMutation<#value>>::commit_logical(input, value, child_token) }),
+                quote!(<#child_support as #runtime::__private::SchemaLogicalMutation<#value>>::preflight_init_logical(input, value).map_err(|_| #capacity)),
+                quote!({ let child_token = <#child_support as #runtime::__private::SchemaSupport>::input_token(&input); <#child_support as #runtime::__private::SchemaLogicalMutation<#value>>::commit_init_logical(input, value, child_token) }),
+                TokenStream::new(),
+            )
         }
-        _ => unreachable!(),
+        string if string.is_string() => {
+            let (element, handle) = string_ops.as_ref().expect("string leaf operations");
+            let capacity = string
+                .string_capacity()
+                .expect("a bounded string leaf declares a capacity");
+            let logical = &handle.logical;
+            let handle_read = &handle.read;
+            let handle_preflight = &handle.preflight;
+            let handle_commit = &handle.commit;
+            let preflight = &element.preflight;
+            let commit = &element.commit;
+            (
+                quote!(#runtime::StringMut<'wire, #string_adapter #plain_args>),
+                quote!(#runtime::StringMut::<#string_adapter #plain_args>::prove(input, token)),
+                preflight.clone(),
+                commit.clone(),
+                preflight.clone(),
+                commit.clone(),
+                quote!(
+                    pub struct #string_adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
+                    impl #plain_generics #runtime::__private::InputAccess for #string_adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
+                    impl #plain_generics #runtime::__private::StringMutationAdapter for #string_adapter #plain_args #support_where {
+                        type Wire = #element_wire;
+                        type Owner = #owner #plain_args;
+                        type Logical = #logical;
+                        const CAPACITY: usize = #capacity;
+                        fn read<'wire>(input: #runtime::__private::SharedInput<'wire, Self::Wire>) -> ::core::result::Result<&'wire Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { #handle_read }
+                        fn preflight(input: #runtime::__private::SharedInput<'_, Self::Wire>, value: &Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { #handle_preflight }
+                        fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: &Self::Logical, token: Self::Token) { #handle_commit }
+                    }
+                ),
+            )
+        }
+        _ => unreachable!("array leaf categories are validated by analysis"),
     };
-    let (mut_ty, make_mut, preflight, commit, preflight_init, commit_init, scalar_impl) =
-        match element.as_ref() {
-            FieldCategory::Primitive(_) => {
-                let ty = &array.elem;
-                (
-                    quote!(#runtime::ScalarMut<'wire, #ty, #scalar_adapter #plain_args>),
-                    quote!(#runtime::ScalarMut::prove(input, token)),
-                    quote!(Ok(())),
-                    quote!({
-                        let bytes = match input.subrange_bytes_mut::<Self>(
-                            0,
-                            ::core::mem::size_of::<Self::Wire>(),
-                            token,
-                        ) {
-                            Ok(bytes) => bytes,
-                            Err(_) => unreachable!("preflighted array scalar remains exact"),
-                        };
-                        Self::Wire::new(*value).store_preflighted(bytes);
-                    }),
-                    quote!(Ok(())),
-                    quote!({
-                        let bytes = match input.subrange_bytes_mut::<Self>(
-                            0,
-                            ::core::mem::size_of::<Self::Wire>(),
-                            token,
-                        ) {
-                            Ok(bytes) => bytes,
-                            Err(_) => unreachable!("preflighted array scalar remains exact"),
-                        };
-                        Self::Wire::new(*value).store_preflighted(bytes);
-                    }),
-                    quote!(
-                        pub struct #scalar_adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
-                        impl #plain_generics #runtime::__private::InputAccess for #scalar_adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
-                        impl #plain_generics #runtime::__private::ScalarMutationAdapter for #scalar_adapter #plain_args #support_where {
-                            type Wire = #element_wire; type Owner = #owner #plain_args; type Logical = #ty;
-                            fn read(input: #runtime::__private::SharedInput<'_, Self::Wire>) -> ::core::result::Result<Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { input.read_copy::<Self::Wire>(0).map(|wire| wire.get()).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout) }
-                            fn preflight(_: Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { Ok(()) }
-                            fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: Self::Logical, token: Self::Token) { let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array scalar remains exact") }; Self::Wire::new(value).store_preflighted(bytes); }
-                        }
-                    ),
-                )
-            }
-            FieldCategory::Bool => {
-                let variant = emit_access::error_array_bool_variant(field);
-                let inner = emit_access::error_array_bool_error_type(field);
-                (
-                    quote!(#runtime::ScalarMut<'wire, bool, #scalar_adapter #plain_args>),
-                    quote!(#runtime::ScalarMut::prove(input, token)),
-                    quote!(Ok(())),
-                    quote!({ let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array Boolean remains exact") }; #runtime::__private::BoolWire::store_preflighted(*value, bytes); }),
-                    quote!(Ok(())),
-                    quote!({ let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array Boolean remains exact") }; #runtime::__private::BoolWire::store_preflighted(*value, bytes); }),
-                    quote!(
-                        pub struct #scalar_adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
-                        impl #plain_generics #runtime::__private::InputAccess for #scalar_adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
-                        impl #plain_generics #runtime::__private::ScalarMutationAdapter for #scalar_adapter #plain_args #support_where {
-                            type Wire = #element_wire; type Owner = #owner #plain_args; type Logical = bool;
-                            fn read(input: #runtime::__private::SharedInput<'_, Self::Wire>) -> ::core::result::Result<Self::Logical, <Self::Owner as #runtime::__private::OwnerAdapter>::AccessError> { let wire=input.read_copy::<Self::Wire>(0).map_err(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout)?; wire.decode().ok_or(#access_error::#variant(#inner { index: 0, raw: wire.raw() })) }
-                            fn preflight(_: Self::Logical) -> ::core::result::Result<(), <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError> { Ok(()) }
-                            fn commit(mut input: #runtime::__private::ExclusiveInput<'_, Self::Wire>, value: Self::Logical, token: Self::Token) { let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array Boolean remains exact") }; #runtime::__private::BoolWire::store_preflighted(value, bytes); }
-                        }
-                    ),
-                )
-            }
-            FieldCategory::Path { .. } => {
-                let ty = analyze::support_type(&array.elem);
-                let child_support = quote!(<#ty as #runtime::__private::WireTypeSupport>::Support);
-                let value_ty = array_value_type(ir, element, &array.elem, quote!('value));
-                let variant = emit_access::error_array_child_variant(field);
-                let inner = emit_access::error_array_child_error_type(field);
-                (
-                    quote!(<#child_support as #runtime::__private::SchemaSupport>::Mut<'wire>),
-                    quote!(match <#child_support as #runtime::__private::SchemaSupport>::prove_mut(input) { Ok(proof) => Ok(<#child_support as #runtime::__private::SchemaSupport>::make_mut(proof)), Err(source) => Err(#access_error::#variant(#inner { index, source })) }),
-                    quote!(<#child_support as #runtime::__private::SchemaLogicalMutation<#value_ty>>::preflight_logical(input, value).map_err(|_| #mutation::array(#field_name, index, #runtime::ErrorKind::CapacityExceeded))),
-                    quote!({ let child_token = <#child_support as #runtime::__private::SchemaSupport>::input_token(&input); <#child_support as #runtime::__private::SchemaLogicalMutation<#value_ty>>::commit_logical(input, value, child_token) }),
-                    quote!(<#child_support as #runtime::__private::SchemaLogicalMutation<#value_ty>>::preflight_init_logical(input, value).map_err(|_| #mutation::array(#field_name, index, #runtime::ErrorKind::CapacityExceeded))),
-                    quote!({ let child_token = <#child_support as #runtime::__private::SchemaSupport>::input_token(&input); <#child_support as #runtime::__private::SchemaLogicalMutation<#value_ty>>::commit_init_logical(input, value, child_token) }),
-                    TokenStream::new(),
-                )
-            }
-            _ => unreachable!(),
+    // A nested array composes the runtime combinator over the leaf adapter, so
+    // the field-level adapter name resolves to the adapter of one outer row.
+    let nested_alias = if depth > 1 {
+        let mut composed = quote!(#adapter #plain_args);
+        for dimension in dims.iter().skip(1).rev() {
+            composed = quote!(#runtime::__private::NestedArrayAdapter<#composed, #dimension>);
+        }
+        let alias_generics = ir
+            .generics
+            .original
+            .params
+            .iter()
+            .filter_map(|parameter| match parameter {
+                syn::GenericParam::Type(parameter) => {
+                    let ident = &parameter.ident;
+                    Some(quote!(#ident))
+                }
+                syn::GenericParam::Const(parameter) => {
+                    let ident = &parameter.ident;
+                    let ty = &parameter.ty;
+                    Some(quote!(const #ident: #ty))
+                }
+                syn::GenericParam::Lifetime(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let alias_generics = if alias_generics.is_empty() {
+            TokenStream::new()
+        } else {
+            quote!(<#(#alias_generics),*>)
         };
+        quote!(pub type #alias #alias_generics = #composed;)
+    } else {
+        TokenStream::new()
+    };
     Ok(quote!(
-        #scalar_impl
+        #extra
         pub struct #adapter #plain_generics(::core::marker::PhantomData<fn() -> (#element_wire, #owner #plain_args)>) #support_where;
         impl #plain_generics #runtime::__private::InputAccess for #adapter #plain_args #support_where { type Token = __ZeroSchemaInputAccessToken; }
         impl #plain_generics #runtime::__private::ArrayElementAdapter for #adapter #plain_args #support_where {
@@ -811,7 +967,132 @@ fn emit_array_adapter(
             fn index_error(index: usize, _: usize) -> <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError { #mutation::array(#field_name, index, #runtime::ErrorKind::ArrayIndexOutOfBounds) }
             fn length_error(actual: usize, expected: usize) -> <Self::Owner as #runtime::__private::OwnerAdapter>::MutationError { let _ = actual; let _ = expected; #mutation::field_kind(#field_name, #runtime::ErrorKind::ArrayLengthMismatch) }
         }
+        #nested_alias
     ))
+}
+
+/// Source-form string operations for a bounded string leaf of a fixed array.
+///
+/// `preflight` and `read` are block expressions over the surrounding impl's
+/// `input` and `value`; `commit` is a statement list over `input`, `value`, and
+/// `token`. The caller chooses how a string failure is reported: through the
+/// element's array position for whole-array operations, or as a field-level
+/// failure for the standalone per-element handle.
+struct StringElementOps {
+    logical: TokenStream,
+    preflight: TokenStream,
+    commit: TokenStream,
+    read: TokenStream,
+}
+
+fn string_element_ops(
+    leaf: &FieldCategory,
+    runtime: &Path,
+    preflight_error: &dyn Fn(TokenStream) -> TokenStream,
+    read_error: &dyn Fn(TokenStream) -> TokenStream,
+) -> syn::Result<StringElementOps> {
+    let token = quote!(__ZeroSchemaInputAccessToken { _private: () });
+    let access_layout = quote!(<Self::Owner as #runtime::__private::OwnerAdapter>::access_layout);
+    let mutation_layout =
+        quote!(<Self::Owner as #runtime::__private::OwnerAdapter>::mutation_layout);
+    let on_preflight = preflight_error(quote!(error));
+    let proof_kind = quote!(match error {
+        #runtime::__private::StringProofError::LengthOutOfBounds { .. } => #runtime::ErrorKind::LengthOutOfBounds,
+        #runtime::__private::StringProofError::InvalidUtf8(_) => #runtime::ErrorKind::InvalidUtf8,
+        #runtime::__private::StringProofError::MissingNul => #runtime::ErrorKind::MissingNul,
+    });
+    let on_proof = read_error(proof_kind);
+    let on_missing_nul = read_error(quote!(#runtime::ErrorKind::MissingNul));
+    let unit = quote!(::core::mem::size_of::<::core::primitive::u16>());
+    Ok(match leaf {
+        FieldCategory::BorrowedStr {
+            capacity,
+            len_type,
+            endian,
+            ..
+        } => {
+            let length = emit_wire::length_wire(len_type, *endian)?;
+            StringElementOps {
+                logical: quote!(str),
+                preflight: quote!({
+                    let prefix = input.subrange_bytes::<Self>(<Self::Wire>::LEN_OFFSET, <#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH, #token).map_err(#mutation_layout)?;
+                    let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity, #token).map_err(#mutation_layout)?;
+                    #runtime::__private::preflight_str::<#runtime::__private::#length>(prefix, data, value).map_err(|error| #on_preflight)
+                }),
+                commit: quote!(
+                    let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array string remains exact") };
+                    let (prefix_storage, data) = bytes.split_at_mut(<Self::Wire>::DATA_OFFSET);
+                    let prefix = &mut prefix_storage[<Self::Wire>::LEN_OFFSET..<#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH];
+                    let data = &mut data[..#capacity];
+                    #runtime::__private::commit_str::<#runtime::__private::#length>(prefix, data, value);
+                ),
+                read: quote!({
+                    let length = input.read_copy::<#runtime::__private::#length>(<Self::Wire>::LEN_OFFSET).map_err(#access_layout)?;
+                    let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity, #token).map_err(#access_layout)?;
+                    #runtime::__private::prove_str(&length, data).map_err(|error| #on_proof)
+                }),
+            }
+        }
+        FieldCategory::BorrowedCStr { capacity, .. } => StringElementOps {
+            logical: quote!(::core::ffi::CStr),
+            preflight: quote!({
+                let data = input.subrange_bytes::<Self>(0, #capacity, #token).map_err(#mutation_layout)?;
+                #runtime::__private::preflight_c_str(data, value).map_err(|error| #on_preflight)
+            }),
+            commit: quote!(
+                let data = match input.subrange_bytes_mut::<Self>(0, #capacity, token) { Ok(data) => data, Err(_) => unreachable!("preflighted array C string remains exact") };
+                #runtime::__private::commit_c_str(data, value);
+            ),
+            read: quote!({
+                let data = input.subrange_bytes::<Self>(0, #capacity, #token).map_err(#access_layout)?;
+                #runtime::__private::prove_c_str(data).map_err(|_| #on_missing_nul)
+            }),
+        },
+        FieldCategory::BorrowedU16Str {
+            capacity,
+            len_type,
+            endian,
+            ..
+        } => {
+            let length = emit_wire::length_wire(len_type, *endian)?;
+            StringElementOps {
+                logical: quote!(#runtime::__private::U16Str),
+                preflight: quote!({
+                    let prefix = input.subrange_bytes::<Self>(<Self::Wire>::LEN_OFFSET, <#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH, #token).map_err(#mutation_layout)?;
+                    let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity * #unit, #token).map_err(#mutation_layout)?;
+                    #runtime::__private::preflight_u16_str::<#runtime::__private::#length>(prefix, data, value).map_err(|error| #on_preflight)
+                }),
+                commit: quote!(
+                    let bytes = match input.subrange_bytes_mut::<Self>(0, ::core::mem::size_of::<Self::Wire>(), token) { Ok(bytes) => bytes, Err(_) => unreachable!("preflighted array wide string remains exact") };
+                    let (prefix_storage, data) = bytes.split_at_mut(<Self::Wire>::DATA_OFFSET);
+                    let prefix = &mut prefix_storage[<Self::Wire>::LEN_OFFSET..<#runtime::__private::#length as #runtime::__private::LengthWire>::WIDTH];
+                    let data = &mut data[..#capacity * #unit];
+                    #runtime::__private::commit_u16_str::<#runtime::__private::#length>(prefix, data, value);
+                ),
+                read: quote!({
+                    let length = input.read_copy::<#runtime::__private::#length>(<Self::Wire>::LEN_OFFSET).map_err(#access_layout)?;
+                    let data = input.subrange_bytes::<Self>(<Self::Wire>::DATA_OFFSET, #capacity * #unit, #token).map_err(#access_layout)?;
+                    #runtime::__private::prove_u16_str_bytes::<#runtime::__private::#length, #capacity>(&length, data).map_err(|error| #on_proof)
+                }),
+            }
+        }
+        FieldCategory::BorrowedU16CStr { capacity, .. } => StringElementOps {
+            logical: quote!(#runtime::__private::U16CStr),
+            preflight: quote!({
+                let data = input.subrange_bytes::<Self>(0, #capacity * #unit, #token).map_err(#mutation_layout)?;
+                #runtime::__private::preflight_u16_c_str(data, value).map_err(|error| #on_preflight)
+            }),
+            commit: quote!(
+                let data = match input.subrange_bytes_mut::<Self>(0, #capacity * #unit, token) { Ok(data) => data, Err(_) => unreachable!("preflighted array wide C string remains exact") };
+                #runtime::__private::commit_u16_c_str(data, value);
+            ),
+            read: quote!({
+                let data = input.subrange_bytes::<Self>(0, #capacity * #unit, #token).map_err(#access_layout)?;
+                #runtime::__private::prove_u16_c_str_bytes::<#capacity>(data).map_err(|_| #on_missing_nul)
+            }),
+        },
+        _ => unreachable!("only bounded string categories have string element operations"),
+    })
 }
 
 fn emit_simple_logical_mutation(
@@ -1637,16 +1918,18 @@ fn logical_mutation_support_where(ir: &SchemaIr, runtime: &Path, source: &Lifeti
                 tagged_type_bounds.push(quote!(for<#payload_lifetime> #payload: #runtime::__private::TaggedPayloadTypeSupport<Tag = #tag, Logical<#payload_lifetime> = #payload_logical> + 'static));
                 tagged_logical_bounds.push(quote!(#payload_support: #runtime::__private::TaggedPayloadLogicalMutation<#logical>));
             }
-            FieldCategory::Array { element, .. }
-                if matches!(element.as_ref(), FieldCategory::Path { .. }) =>
+            FieldCategory::Array { .. }
+                if matches!(
+                    field.category.array_leaf(),
+                    Some((FieldCategory::Path { .. }, _))
+                ) =>
             {
-                let Type::Array(array) = &field.ty else {
-                    unreachable!("array category has an array type")
-                };
-                let child = analyze::support_type(&array.elem);
+                let (leaf, _) = field.category.array_leaf().expect("array category");
+                let leaf_ty = emit_access::array_leaf_type(&field.ty);
+                let child = analyze::support_type(leaf_ty);
                 let child_support =
                     quote!(<#child as #runtime::__private::WireTypeSupport>::Support);
-                let logical = array_value_type(ir, element, &array.elem, quote!(#source));
+                let logical = array_value_type(ir, runtime, leaf, leaf_ty, quote!(#source));
                 child_support_bounds
                     .push(quote!(#child: #runtime::__private::WireTypeSupport + 'static));
                 nested_bounds.push(
@@ -1677,7 +1960,8 @@ fn logical_mutation_support_where(ir: &SchemaIr, runtime: &Path, source: &Lifeti
                     let child = &support_array.elem;
                     let child_support =
                         quote!(<#child as #runtime::__private::WireTypeSupport>::Support);
-                    let logical = array_value_type(ir, element, &array.elem, quote!(#source));
+                    let logical =
+                        array_value_type(ir, runtime, element, &array.elem, quote!(#source));
                     child_support_bounds
                         .push(quote!(#child: #runtime::__private::OptionalWireType + 'static));
                     nested_bounds.push(quote!(#child_support: #runtime::__private::SchemaLogicalMutation<#logical>));
@@ -1735,16 +2019,12 @@ fn array_adapter_support_where(ir: &SchemaIr, field: &FieldIr, runtime: &Path) -
     } else {
         Vec::new()
     };
-    let logical_bound = match &field.category {
-        FieldCategory::Array { element, .. }
-            if matches!(element.as_ref(), FieldCategory::Path { .. }) =>
-        {
-            let Type::Array(array) = &field.ty else {
-                unreachable!("array category has an array type")
-            };
-            let child = analyze::support_type(&array.elem);
+    let logical_bound = match field.category.array_leaf() {
+        Some((leaf, _)) if matches!(leaf, FieldCategory::Path { .. }) => {
+            let leaf_ty = emit_access::array_leaf_type(&field.ty);
+            let child = analyze::support_type(leaf_ty);
             let child_support = quote!(<#child as #runtime::__private::WireTypeSupport>::Support);
-            let logical = array_value_type(ir, element, &array.elem, quote!(#array_source));
+            let logical = array_value_type(ir, runtime, leaf, leaf_ty, quote!(#array_source));
             quote!(for<#array_source> #child_support: #runtime::__private::SchemaLogicalMutation<#logical>,)
         }
         _ => TokenStream::new(),
@@ -1781,6 +2061,14 @@ fn option_adapter_name(field: &FieldIr) -> Ident {
 fn array_scalar_adapter_name(field: &FieldIr) -> Ident {
     format_ident!("{}ArrayScalarAdapter", pascal(&field.logical_name))
 }
+fn array_string_adapter_name(field: &FieldIr) -> Ident {
+    format_ident!("{}ArrayStringAdapter", pascal(&field.logical_name))
+}
+/// The element adapter of a nested array's innermost level; the field-level
+/// adapter name is a composition of the runtime combinator over this type.
+fn array_leaf_adapter_name(field: &FieldIr) -> Ident {
+    format_ident!("{}ArrayLeafAdapter", pascal(&field.logical_name))
+}
 
 fn pascal(value: &str) -> String {
     let mut output = String::new();
@@ -1798,26 +2086,12 @@ fn pascal(value: &str) -> String {
     output
 }
 
-fn array_logical_type(
-    _ir: &SchemaIr,
-    category: &FieldCategory,
-    ty: &Type,
-    runtime: &Path,
-    lifetime: TokenStream,
-) -> TokenStream {
-    match category {
-        FieldCategory::Primitive(_) => quote!(#ty),
-        FieldCategory::Bool => quote!(bool),
-        FieldCategory::Path { .. } => {
-            let support = analyze::support_type(ty);
-            quote!(<<#support as #runtime::__private::WireTypeSupport>::Support as #runtime::__private::SchemaSupport>::Ref<#lifetime>)
-        }
-        _ => quote!(#ty),
-    }
-}
-
+/// The declared logical source accepted by `set` and `copy_from` for one array
+/// element: a scalar by value, a string or schema as its borrowed logical form,
+/// and a nested array as the natural `[inner; N]` value.
 fn array_value_type(
     ir: &SchemaIr,
+    runtime: &Path,
     category: &FieldCategory,
     ty: &Type,
     lifetime: TokenStream,
@@ -1826,6 +2100,17 @@ fn array_value_type(
         FieldCategory::Primitive(_) => quote!(#ty),
         FieldCategory::Bool => quote!(bool),
         FieldCategory::Path { .. } => rebind_source_lifetime(ir, ty, lifetime),
+        string if string.is_string() => {
+            emit_access::string_logical_type(string, runtime, &lifetime)
+        }
+        FieldCategory::Array { element, .. } => {
+            let Type::Array(array) = ty else {
+                unreachable!("nested array category carries an array type");
+            };
+            let inner = array_value_type(ir, runtime, element, &array.elem, lifetime);
+            let length = &array.len;
+            quote!([#inner; #length])
+        }
         _ => quote!(#ty),
     }
 }

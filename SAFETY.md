@@ -21,9 +21,11 @@ data-race rules.
 - initialize every byte in the exact root span before Rust forms a slice, including
   parent padding, bounded-string unused capacity, and inactive union payload storage;
 - for a successful root access, provide exactly `SCHEMA_SIZE` bytes whose first byte
-  meets `SCHEMA_ALIGN`, keep the allocation live, and prevent external mutation or
-  reuse for every derived capability. Shared capabilities require a stable span;
-  constrained writes occur only through an exclusive mutable capability; and
+  meets `SCHEMA_ALIGN` (for `access_prefix`/`access_mut_prefix`, a longer span whose
+  leading `SCHEMA_SIZE` bytes are the root, with bytes after them still initialized
+  because they belong to the slice), keep the allocation live, and prevent external
+  mutation or reuse for every derived capability. Shared capabilities require a stable
+  span; constrained writes occur only through an exclusive mutable capability; and
 - write only declared scalar/string representations, and keep each external tag
   coupled to its selected payload. `Option<T>::None` is all zeroes in its complete
   optional field span, not a convention for parent padding.
@@ -32,8 +34,13 @@ data-race rules.
 
 - obtain a capability with `access` or `access_mut` before logical reads or writes;
   a failed proof grants no view of the representation;
-- treat `SchemaBuffer` as aligned, initialized Rust receiving storage only. Its initial
-  zero-fill does not initialize a schema; producer bytes still require `access`; and
+- treat `SchemaBuffer`, inline or boxed, as aligned, initialized Rust receiving storage
+  only. The zero-fill of `make_schema_buffer!` and `make_boxed_schema_buffer!` carries no
+  schema interpretation, so producer bytes still require `access`. The zero-start
+  constructors `make_zeroed_schema_buffer!` and `make_zeroed_boxed_schema_buffer!` accept
+  only a root whose `ZERO_IS_VALID` is `true` and document their bytes as type-valid
+  until changed, but they grant no capability either: the first `access` or
+  `access_mut` still proves the bytes; and
 - use only capability operations. Mutable field, nested, selected-payload, and option
   handles are short reborrows; if any fallible mutation returns an error, every byte
   of the destination root span is unchanged.
@@ -56,7 +63,9 @@ independently maintained producer.
 A generated root constructor applies this sequence:
 
 1. It checks that the supplied span length is exactly `SCHEMA_SIZE`; size failure
-   takes precedence over an alignment failure.
+   takes precedence over an alignment failure. The prefix constructors instead require
+   at least `SCHEMA_SIZE` bytes, split off exactly that many leading bytes with checked
+   slice splitting, and continue only on that prefix with the same size-first order.
 2. It checks the address against `SCHEMA_ALIGN` before forming any typed wire view.
 3. It keeps the original bounded byte input private. Every generated child selection
    uses checked offset addition, exact subrange bounds, and required child alignment.
@@ -66,6 +75,12 @@ A generated root constructor applies this sequence:
    and the one selected payload associated with each external tag.
 5. It returns a capability only if every required check succeeded. `access_mut` runs
    the same proof through a shared reborrow before it creates an exclusive capability.
+
+A prefix constructor's returned remainder is the caller's own tail of the span as a
+plain slice. It is disjoint from every byte the capability can reach (for
+`access_mut_prefix` it is a separate exclusive borrow), is neither read nor validated by
+the proof, and gives no access to the capability's bytes, so it neither exposes raw wire
+storage nor weakens the exclusivity of the proved prefix.
 
 The proof deliberately ignores ordinary compiler padding outside a zero-sentinel
 `Option` StorageWire, unused bounded-string capacity, and inactive union payload
@@ -96,6 +111,25 @@ member. Strings borrow only after their active representation is proven; scalar 
 are returned only after their discriminant is valid; and an external union selects a
 payload only after its sibling scalar tag is valid.
 
+### Zero validity and zero-start storage
+
+Every generated record and scalar enum has `ZERO_IS_VALID`, the exact compile-time
+answer to whether an all-zero root span passes the access proof. It is derived from the
+declaration alone: primitives, Booleans, fixed bytes, every bounded string form, and
+`Option<T>` are always zero-valid; a scalar enum needs a declared `0`; nested schemas
+and arrays take their element's value; a tagged payload needs the variant selected by
+tag `0`, with a zero-valid payload. The
+[design RFC §9.5](docs/zero-schema-design-rfc.md#95-all-zero-validity-zero_is_valid)
+is normative.
+
+The constant is a convenience over the proof, never an input to it. The checked
+constructors use it only to refuse a compile for a root whose zero span would be
+rejected; they hold no `unsafe`, return only `SchemaBuffer` storage, and expose no
+unchecked capability. `access` and `access_mut` rerun the full eager proof on those
+bytes, so a wrong constant could cost a runtime `Err` but could not make an invalid
+representation observable. The "valid until changed" promise ends at the first direct
+write through `SchemaBuffer::as_bytes_mut`; capability mutation preserves validity.
+
 ## Borrowing and zero-copy capabilities
 
 A shared root capability is `Copy + Clone`. Its scalar getters return values and its
@@ -112,6 +146,14 @@ private bounded ranges rather than manufacture overlapping mutable references.
 Array capabilities maintain O(1) state. Their element lookups, iteration, and logical
 materialization use bounded indexed selections; no decoded aggregate or heap proxy
 collection is retained by the capability.
+
+A fixed array of bounded strings proves every element's active representation and
+terminator in increasing index order, and borrowed elements are tied to the source
+lifetime like a string field. A nested array's rows are the same O(1) views over
+exact inner ranges; a row handle only remembers its flat origin so error paths can
+name every enclosing index. Whole-array and whole-row transfer preflight every
+element of every row before the first write, so a rejected later element leaves all
+bytes unchanged.
 
 `OptionMut<'view, T, _>` is equally O(1) and field-local. `get()` and `get_mut()`
 rescan the live complete field span rather than cache presence. A child from
@@ -160,8 +202,10 @@ declared capacities; these core operations allocate nothing.
 including padding ranges and `FieldDescriptor::is_optional()`, but it never selects
 memory or relaxes access checks. The optional protocol derives from that field's exact
 descriptor span, not from generic parent padding metadata. Allocation may occur only
-in caller code or optional convenience APIs such as an owned formatted error path
-enabled by `alloc`.
+in caller code or optional convenience APIs enabled by `alloc`, such as an owned
+formatted error path and `SchemaBuffer::new_boxed`. The latter allocates its zeroed
+buffer through `zerocopy`'s `FromZeros::new_box_zeroed` (no handwritten `unsafe`) and
+reports allocation failure like `Box::new`.
 
 ## Normative design and evidence
 

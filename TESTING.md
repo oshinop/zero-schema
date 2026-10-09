@@ -60,7 +60,7 @@ This one target runs the inline units in these source modules:
 
 ## Root integration targets
 
-Cargo metadata registers the following 23 root integration targets. Run one focused target
+Cargo metadata registers the following 25 root integration targets. Run one focused target
 with:
 
 ```console
@@ -70,28 +70,30 @@ cargo +1.85.0 test --locked -p zero-schema --test <target>
 | Target | Contract protected |
 | --- | --- |
 | `allocation` | Access, reads, arrays, selected unions, patches, and error formatting allocate zero times. |
-| `capability_access` | Reviewed bytes yield borrowed field capabilities, diagnostic metadata, and short mutable reborrows. |
+| `capability_access` | Reviewed bytes yield borrowed field capabilities, diagnostic metadata, short mutable reborrows, and `StringMut::capacity()` units and boundaries. |
 | `cross_crate` | Public/private composition, generic descriptors, errors, and tagged payloads across real crate boundaries. |
 | `error_paths` | Eager nested access paths retain field, index, and variant structure. |
-| `exact_span` | Callers choose exact stride-sized slots; no remainder-taking root API exists. |
+| `exact_span` | `access` stays exact-length for stride-sized slots; `access_prefix`/`access_mut_prefix` prove only the leading `SCHEMA_SIZE` bytes, return a disjoint remainder, and report short spans before alignment. |
 | `focused_capabilities` | Full representative schema: exact/aligned proof, reads, mutation, arrays, patches, external unions, ignored bytes, and atomic errors. |
 | `golden` | Reviewed scalar, record, string, and external-union producer fixtures plus frozen layout/error facts. |
 | `golden_inventory` | Corpus inventory grammar, registration, paths, lengths, and hashes. |
 | `generic_lifetime_regression` | Source-lifetime rebinding and generic nested-schema composition across a downstream crate. |
 | `invalid_bytes` | Deterministic eager rejection of invalid Boolean, enum, strings, selected payloads, and arrays while ignored storage stays irrelevant. |
 | `macro_hygiene` | Runtime-path override, raw identifiers, and shadowed-prelude expansion over producer bytes. |
-| `miri` | Focused provenance, borrow, mutation, patch, and ignored-storage suite; execute it through Miri below. |
+| `miri` | Focused provenance, borrow, mutation, patch, prefix-access, boxed-storage, and ignored-storage suite; execute it through Miri below. |
 | `mutation_atomicity` | Failed field, array, tag-only, and mismatched-union preflight preserves every byte. |
 | `no_alloc` | Single-thread allocation instrumentation for core capability operations. |
 | `optional_zero_sentinel` | Zero-sentinel `Option` storage and metadata for zero-invalid enum/schema/array paths, complete-span clearing, atomic `OptionMut` and tri-state patches, and eager malformed-present diagnostics. |
 | `producer_fixture` | Independent reviewed fixture identity, alignment, hash, and nonzero ignored storage. |
 | `private_capability_safety` | Safe-code compile failures pin private proof inputs, immutable capabilities, and absence of raw aggregate wire access. |
 | `properties` | Fixed-seed arbitrary initialized bytes never panic; producer access/no-op patch stays valid. |
-| `receiving_storage` | `schema_buffer!` named types and `make_schema_buffer!` values preserve exact size/alignment and receiving-only semantics, including concrete generic roots. |
+| `receiving_storage` | `schema_buffer!` named types, `make_schema_buffer!` and `make_boxed_schema_buffer!` values preserve exact size/alignment and receiving-only semantics, including concrete generic roots and heap-first construction of a buffer larger than a thread stack. |
 | `roundtrip` | Producer access → logical materialization → patch → fresh access transfer contract. |
 | `scalar_cross_crate` | Scalar capabilities, metadata, and structured errors across a downstream crate. |
 | `scalar_enum` | Scalar-root exact access, closed discriminants, mutation, patch, and metadata. |
 | `tagged_external` | Independent external tags, selected payload capabilities, complete switches, and tag/payload patch rules. |
+| `string_and_nested_arrays` | Arrays of all four bounded string forms and arrays of arrays: C++ multidimensional layout and metadata, zero-copy reads, per-element `StringMut`, row handles, indexed `field[i][j]` access and mutation errors, atomic `copy_from`/patch, and child-record composition. |
+| `zero_validity` | Exact `ZERO_IS_VALID` against the eager proof of a zeroed span over enums, strings, `Option`, nested and array composition, tagged payloads (zero tag valid, invalid, unit, unclaimed), generic and cross-crate children; const-context use; `make_zeroed_schema_buffer!` and `make_zeroed_boxed_schema_buffer!` first-access acceptance and validity after capability mutation. |
 
 `tests/support/producer.rs` copies reviewed binary fixtures into explicitly aligned
 storage. It is fixture support, not a schema producer. `tests/support/counting_alloc.rs`
@@ -106,11 +108,13 @@ cargo +1.85.0 test --locked -p zero-schema-macros --test mutation_api
 ```
 
 The macro library target covers syntax analysis and generated support. The `ui` harness
-explicitly registers 12 passing sources (`00_retained_item` through
-`11_symbolic_nonzero_arrays`) and 76 compile-fail sources, each with a reviewed
+explicitly registers 14 passing sources (`00_retained_item` through
+`13_zeroed_buffer_option_fix`) and 84 compile-fail sources, each with a reviewed
 diagnostic fixture. The failures cover removed surface requests, exact option grammar,
 invalid item/tag relationships, tagged payload root/storage attempts, zero-size and
-array restrictions, recursion, wide-string option scope, generated-name collisions,
+array restrictions, recursion, wide-string option scope, generated-name collisions
+(including `access_prefix` and `ZERO_IS_VALID`), zero-start buffers over a root whose
+enum has no `= 0` variant (the `Option<Enum>` fix passes),
 and zero-sentinel `Option` eligibility: only zero-invalid enum/schema paths and fixed
 arrays are accepted; direct primitives, Boolean, strings/bytes, tagged payloads, nested
 `Option`, element-level optional arrays, zero-valid records/scalars/tagged variants,
@@ -184,6 +188,18 @@ cargo +stable test --locked --doc --workspace
 RUSTDOCFLAGS='-D warnings' cargo +stable doc --locked --workspace --all-features --no-deps
 ```
 
+The dependency requirements for `zerocopy` and `widestring` are compatible ranges, while
+the committed lockfiles hold their minimum (`zerocopy` 0.8.54). To check a later release,
+resolve the lockfile in a scratch checkout, run the root workspace gate and the macro UI
+gate there, and discard the resulting lockfile change:
+
+```console
+cargo +1.85.0 update -p zerocopy --precise 0.8.61
+cargo +1.85.0 test --workspace --all-features --exclude zero-schema-macros --lib --tests
+cargo +1.85.0 test -p zero-schema-macros --test ui
+git checkout -- Cargo.lock
+```
+
 Pinned formatting checks cover the root, fuzz, and wide-endian manifests. Pinned
 Clippy checks cover the root workspace and fuzz manifest; see `.github/workflows/ci.yml`.
 
@@ -216,6 +232,11 @@ ci/check-wide-endian.sh big powerpc64-unknown-linux-gnu
 ```
 
 ## C++ conformance and reviewed fixtures
+
+Fixed arrays of bounded strings and nested arrays are ABI-verified by the
+`string_and_nested_arrays` root target against byte images in the C++
+`wchar_t names[N][CAP]` / `T grid[M][N]` layout, plus a focused Miri case; they are
+not part of the C++ conformance registry below.
 
 `zero-schema-conformance` compares Rust capabilities with C++17 producer/observer
 fixtures. Its ordinary native commands are:

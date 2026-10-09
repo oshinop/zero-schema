@@ -8,8 +8,8 @@ publish = false
 
 [dependencies]
 zero-schema = { path = "../..", default-features = false, features = ["std"] }
-zerocopy = { version = "=0.8.54", features = ["derive"] }
-widestring = { version = "=1.2.1", default-features = false }
+zerocopy = { version = "0.8.54", features = ["derive"] }
+widestring = { version = "1.2.1", default-features = false }
 
 [[test]]
 name = "miri"

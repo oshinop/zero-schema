@@ -214,6 +214,14 @@ pub enum ArrayElementKind {
     Schema {
         layout: &'static LayoutDescriptor,
     },
+    /// One bounded string per element. `data_offset` and any length-prefix
+    /// offset are relative to the start of that element; the element stride is
+    /// the string wire's compiler-derived size.
+    String(StringDescriptor),
+    /// A nested fixed array: every element is itself a fixed array whose
+    /// descriptor is the borrowed one. The outer stride equals the inner
+    /// array's total wire size, matching a C/C++ multidimensional array.
+    Array(&'static ArrayDescriptor),
 }
 
 /// Describes a fixed-size array field.
@@ -317,6 +325,10 @@ impl StringDescriptor {
         self.encoding
     }
 
+    /// Returns the declared `#[zero(capacity = N)]` in storage units: bytes for
+    /// UTF-8 and narrow C strings, `u16` units for wide strings. C-string forms
+    /// count their terminator; length-prefixed forms exclude the prefix. This is
+    /// the same value `StringMut::capacity` reports for the field.
     pub const fn capacity(&self) -> usize {
         self.capacity
     }
@@ -773,6 +785,34 @@ mod tests {
                 schema.stride(),
             ],
             [2, 1, 2, 4]
+        );
+    }
+
+    #[test]
+    fn string_and_nested_array_element_descriptors_are_available() {
+        // A string element keeps the string's own offsets relative to the element.
+        let strings = ArrayDescriptor::__new(ArrayElementKind::String(STRING), 4, 9);
+        // A nested element borrows the inner array's descriptor; its stride is
+        // the inner array's whole wire size.
+        const ROWS: ArrayDescriptor =
+            ArrayDescriptor::__new(ArrayElementKind::Array(&ARRAY), 2, 12);
+        let rows = ROWS;
+        let planes = ArrayDescriptor::__new(ArrayElementKind::Array(&ROWS), 5, 24);
+
+        assert_eq!(strings.element(), ArrayElementKind::String(STRING));
+        assert_eq!((strings.length(), strings.stride()), (4, 9));
+        let ArrayElementKind::Array(row) = rows.element() else {
+            panic!("nested element")
+        };
+        assert_eq!(row, &ARRAY);
+        assert_eq!((rows.length(), rows.stride()), (2, 12));
+        let ArrayElementKind::Array(plane) = planes.element() else {
+            panic!("doubly nested element")
+        };
+        assert_eq!(plane.element(), ArrayElementKind::Array(&ARRAY));
+        assert_eq!(
+            (plane.length(), planes.length(), planes.stride()),
+            (2, 5, 24)
         );
     }
 

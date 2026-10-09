@@ -7,14 +7,14 @@
 //! ```text
 //! [dependencies]
 //! zero-schema = "=0.1.0"
-//! zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+//! zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 //! ```
 //!
 //! Normally import [`zero_schema::zero`](https://docs.rs/zero-schema/latest/zero_schema/attr.zero.html),
 //! which is enabled by that crate's `macros` feature. Importing this crate directly is
 //! also supported. The `crate = path` container option changes only the generated
 //! runtime path; generated wire forms always resolve the consuming crate's direct
-//! `zerocopy` dependency.
+//! `zerocopy` dependency, which may be any `0.8.x` release from the stated minimum.
 //!
 //! # Accepted items
 //!
@@ -58,7 +58,10 @@
 //! # Generated API
 //!
 //! For root records and scalar enums the expansion emits `SCHEMA_SIZE`,
-//! `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, `LAYOUT`, exact eager `access` and `access_mut`,
+//! `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, `ZERO_IS_VALID` (whether an all-zero span is
+//! type-valid), `LAYOUT`, exact eager `access` and `access_mut`,
+//! `access_prefix` and `access_mut_prefix` (the same proofs over the leading
+//! `SCHEMA_SIZE` bytes of a longer span, returning the remainder),
 //! capability/error/patch types, and a doc-hidden wire projection used only for macro
 //! composition. Capabilities expose logical getters, `copy_into`, short field-local
 //! mutation, arrays, selected external-union access, and transactional `copy_from`
@@ -76,8 +79,13 @@
 //! [`zero_schema::schema_buffer!`](https://docs.rs/zero-schema/latest/zero_schema/macro.schema_buffer.html)
 //! names the aligned initialized receiving-storage type for a fully concrete root;
 //! [`zero_schema::make_schema_buffer!`](https://docs.rs/zero-schema/latest/zero_schema/macro.make_schema_buffer.html)
-//! constructs a value. Neither initializes a schema: a producer must populate the
-//! bytes, then the root's `access` decides whether they are type-valid. Tagged payload
+//! constructs a value; with the runtime's `alloc` feature,
+//! `zero_schema::make_boxed_schema_buffer!` constructs the same value directly on the
+//! heap. None initializes a schema: a producer must populate the
+//! bytes, then the root's `access` decides whether they are type-valid. For a root whose
+//! `ZERO_IS_VALID` is `true`, `zero_schema::make_zeroed_schema_buffer!` (and, under
+//! `alloc`, `make_zeroed_boxed_schema_buffer!`) construct the same storage and fail to
+//! compile otherwise; `access` still proves the bytes. Tagged payload
 //! declarations are intentionally rejected here.
 
 extern crate proc_macro;

@@ -101,7 +101,8 @@ fn emit_struct(
     let impl_generics =
         impl_generics_with_dependencies(&ir.generics.original, &impl_dependency_types, runtime);
     let (impl_generics_tokens, _, where_clause) = impl_generics.split_for_impl();
-    let field_metadata = struct_field_metadata(ir, runtime, support_runtime, &root_wire)?;
+    let (field_metadata, array_descriptors) =
+        struct_field_metadata(ir, runtime, support_runtime, &root_wire)?;
     let padding = struct_padding_ranges(ir, runtime, support_runtime, &root_wire)?;
     let abi_assertions = struct_abi_assertions(ir, support_runtime, &root_wire)?;
     let (_, original_ty_generics, _) = ir.generics.original.split_for_impl();
@@ -147,6 +148,7 @@ fn emit_struct(
 
         impl #impl_generics_tokens #ident #original_ty_generics #where_clause {
             const #padding_const: &'static [#runtime::ByteRange] = &[#(#padding),*];
+            #(#array_descriptors)*
             const #fields_const: &'static [#runtime::FieldDescriptor] = &[#(#field_metadata),*];
             const __ZERO_SCHEMA_NONZERO_ARRAYS: () = {
                 #(#nonzero_array_assertions)*
@@ -339,6 +341,7 @@ fn emit_tagged_enum(
     let logical_name = &ir.logical_name;
     let tag_type = &ir.variants[0].tag_type;
     let tagged_zero_state = crate::emit_access::tagged_payload_zero_state(ir, runtime)?;
+    let tagged_zero_is_valid = crate::emit_access::tagged_payload_zero_is_valid(ir, runtime);
     let tagged_logical_arguments = ir
         .generics
         .original
@@ -404,6 +407,7 @@ fn emit_tagged_enum(
             type Logical<'wire> = #tagged_logical;
             type Support = #module::#support #wire_arguments;
             type ZeroState = #tagged_zero_state;
+            const ZERO_IS_VALID: ::core::primitive::bool = #tagged_zero_is_valid;
             const LAYOUT: &'static #runtime::LayoutDescriptor = #tagged_layout;
         }
         #tagged_patch_type_support
@@ -1115,32 +1119,36 @@ pub(crate) fn nonzero_assertions(fields: &[FieldIr]) -> Vec<TokenStream> {
         .collect()
 }
 
+/// Field descriptors plus the associated constants that hold nested array
+/// descriptors. A nested descriptor is borrowed by its parent, so it must be a
+/// named constant (a promotable path) rather than a call argument.
 fn struct_field_metadata(
     ir: &SchemaIr,
     runtime: &Path,
     support_runtime: &Path,
     root_wire: &TokenStream,
-) -> syn::Result<Vec<TokenStream>> {
-    ir.fields
-        .iter()
-        .map(|field| {
-            let name = &field.logical_name;
-            let declaration_index = field.declaration_index;
-            let field_wire = outer_wire_field_type(field, support_runtime)?;
-            let offset = compiler_field_offset(ir, field, support_runtime, root_wire);
-            let kind = field_metadata_kind(ir, field, runtime, support_runtime, root_wire)?;
-            let optional = matches!(field.category, FieldCategory::Optional { .. });
-            Ok(quote!(#runtime::FieldDescriptor::__new(
-                #name,
-                #declaration_index,
-                #offset,
-                ::core::mem::size_of::<#field_wire>(),
-                ::core::mem::align_of::<#field_wire>(),
-                #kind,
-                #optional,
-            )))
-        })
-        .collect()
+) -> syn::Result<(Vec<TokenStream>, Vec<TokenStream>)> {
+    let mut descriptors = Vec::new();
+    let mut nested = Vec::new();
+    for field in &ir.fields {
+        let name = &field.logical_name;
+        let declaration_index = field.declaration_index;
+        let field_wire = outer_wire_field_type(field, support_runtime)?;
+        let offset = compiler_field_offset(ir, field, support_runtime, root_wire);
+        let kind =
+            field_metadata_kind(ir, field, runtime, support_runtime, root_wire, &mut nested)?;
+        let optional = matches!(field.category, FieldCategory::Optional { .. });
+        descriptors.push(quote!(#runtime::FieldDescriptor::__new(
+            #name,
+            #declaration_index,
+            #offset,
+            ::core::mem::size_of::<#field_wire>(),
+            ::core::mem::align_of::<#field_wire>(),
+            #kind,
+            #optional,
+        )));
+    }
+    Ok((descriptors, nested))
 }
 
 fn outer_wire_field_type(field: &FieldIr, runtime: &Path) -> syn::Result<TokenStream> {
@@ -1276,6 +1284,7 @@ fn field_metadata_kind(
     runtime: &Path,
     support_runtime: &Path,
     root_wire: &TokenStream,
+    nested: &mut Vec<TokenStream>,
 ) -> syn::Result<TokenStream> {
     let endian = field.wire_endian.runtime_variant();
     Ok(match &field.category {
@@ -1284,49 +1293,12 @@ fn field_metadata_kind(
             quote!(#runtime::FieldKind::Primitive { primitive: #runtime::PrimitiveKind::#primitive, endian: #runtime::Endian::#endian })
         }
         FieldCategory::Bool => quote!(#runtime::FieldKind::Bool),
-        FieldCategory::BorrowedStr {
-            capacity,
-            len_type,
-            endian,
-            ..
-        } => {
-            let length = length_wire(len_type, *endian)?;
-            let repr = length_repr(len_type);
-            let endian = endian.runtime_variant();
-            quote!(#runtime::FieldKind::String(#runtime::StringDescriptor::__new(
-                #runtime::StringEncoding::Utf8,
-                #capacity,
-                Some(#runtime::LengthDescriptor::__new(#runtime::LengthRepr::#repr, #runtime::Endian::#endian, 0)),
-                #support_runtime::__private::StrWire::<#support_runtime::__private::#length, #capacity>::DATA_OFFSET,
-            )))
-        }
-        FieldCategory::BorrowedCStr { capacity, .. } => {
-            quote!(#runtime::FieldKind::String(#runtime::StringDescriptor::__new(
-                #runtime::StringEncoding::CBytes, #capacity, None,
-                #support_runtime::__private::CStrWire::<#capacity>::DATA_OFFSET,
-            )))
-        }
-        FieldCategory::BorrowedU16Str {
-            capacity,
-            len_type,
-            endian,
-            ..
-        } => {
-            let length = length_wire(len_type, *endian)?;
-            let repr = length_repr(len_type);
-            let endian = endian.runtime_variant();
-            quote!(#runtime::FieldKind::String(#runtime::StringDescriptor::__new(
-                #runtime::StringEncoding::U16,
-                #capacity,
-                Some(#runtime::LengthDescriptor::__new(#runtime::LengthRepr::#repr, #runtime::Endian::#endian, 0)),
-                #support_runtime::__private::U16StrWire::<#support_runtime::__private::#length, #capacity>::DATA_OFFSET,
-            )))
-        }
-        FieldCategory::BorrowedU16CStr { capacity, .. } => {
-            quote!(#runtime::FieldKind::String(#runtime::StringDescriptor::__new(
-                #runtime::StringEncoding::U16C, #capacity, None,
-                #support_runtime::__private::U16CStrWire::<#capacity>::DATA_OFFSET,
-            )))
+        string @ (FieldCategory::BorrowedStr { .. }
+        | FieldCategory::BorrowedCStr { .. }
+        | FieldCategory::BorrowedU16Str { .. }
+        | FieldCategory::BorrowedU16CStr { .. }) => {
+            let descriptor = string_descriptor(string, runtime, support_runtime)?;
+            quote!(#runtime::FieldKind::String(#descriptor))
         }
         FieldCategory::FixedBytes { length, .. } => {
             let length = length.expression();
@@ -1372,25 +1344,18 @@ fn field_metadata_kind(
                 support_runtime,
                 field.wire_endian,
             )?;
-            let element_kind = match element.as_ref() {
-                FieldCategory::Primitive(primitive) => {
-                    let primitive = primitive.runtime_variant();
-                    quote!(#runtime::ArrayElementKind::Primitive { primitive: #runtime::PrimitiveKind::#primitive, endian: #runtime::Endian::#endian })
-                }
-                FieldCategory::Bool => quote!(#runtime::ArrayElementKind::Bool),
-                FieldCategory::Path { .. } => {
-                    let ty = analyze::erased_source_type(&array.elem);
-                    quote!(match <#ty as #runtime::__private::WireType>::LAYOUT.kind() {
-                        #runtime::TypeKind::ScalarEnum { .. } => #runtime::ArrayElementKind::ScalarEnum {
-                            layout: <#ty as #runtime::__private::WireType>::LAYOUT,
-                        },
-                        _ => #runtime::ArrayElementKind::Schema {
-                            layout: <#ty as #runtime::__private::WireType>::LAYOUT,
-                        },
-                    })
-                }
-                _ => unreachable!("array analysis restricts element categories"),
-            };
+            let element_kind = array_element_kind(
+                element,
+                &array.elem,
+                field.wire_endian,
+                runtime,
+                support_runtime,
+                &mut ArrayDescriptorSink {
+                    field: &field.logical_name,
+                    level: 1,
+                    constants: nested,
+                },
+            )?;
             let length = length.expression();
             quote!(#runtime::FieldKind::Array(#runtime::ArrayDescriptor::__new(
                 #element_kind, #length, ::core::mem::size_of::<#element_wire>(),
@@ -1404,7 +1369,160 @@ fn field_metadata_kind(
             inner_field.support_ty = analyze::support_type(inner_ty);
             inner_field.category = (**inner).clone();
             inner_field.options.align = None;
-            field_metadata_kind(ir, &inner_field, runtime, support_runtime, root_wire)?
+            field_metadata_kind(
+                ir,
+                &inner_field,
+                runtime,
+                support_runtime,
+                root_wire,
+                nested,
+            )?
+        }
+    })
+}
+/// Emits the `StringDescriptor` of one bounded string category. The offsets are
+/// relative to the start of the string wire, so the same descriptor serves a
+/// string field and every element of a fixed array of strings.
+fn string_descriptor(
+    category: &FieldCategory,
+    runtime: &Path,
+    support_runtime: &Path,
+) -> syn::Result<TokenStream> {
+    Ok(match category {
+        FieldCategory::BorrowedStr {
+            capacity,
+            len_type,
+            endian,
+            ..
+        } => {
+            let length = length_wire(len_type, *endian)?;
+            let repr = length_repr(len_type);
+            let endian = endian.runtime_variant();
+            quote!(#runtime::StringDescriptor::__new(
+                #runtime::StringEncoding::Utf8,
+                #capacity,
+                Some(#runtime::LengthDescriptor::__new(#runtime::LengthRepr::#repr, #runtime::Endian::#endian, 0)),
+                #support_runtime::__private::StrWire::<#support_runtime::__private::#length, #capacity>::DATA_OFFSET,
+            ))
+        }
+        FieldCategory::BorrowedCStr { capacity, .. } => {
+            quote!(#runtime::StringDescriptor::__new(
+                #runtime::StringEncoding::CBytes, #capacity, None,
+                #support_runtime::__private::CStrWire::<#capacity>::DATA_OFFSET,
+            ))
+        }
+        FieldCategory::BorrowedU16Str {
+            capacity,
+            len_type,
+            endian,
+            ..
+        } => {
+            let length = length_wire(len_type, *endian)?;
+            let repr = length_repr(len_type);
+            let endian = endian.runtime_variant();
+            quote!(#runtime::StringDescriptor::__new(
+                #runtime::StringEncoding::U16,
+                #capacity,
+                Some(#runtime::LengthDescriptor::__new(#runtime::LengthRepr::#repr, #runtime::Endian::#endian, 0)),
+                #support_runtime::__private::U16StrWire::<#support_runtime::__private::#length, #capacity>::DATA_OFFSET,
+            ))
+        }
+        FieldCategory::BorrowedU16CStr { capacity, .. } => {
+            quote!(#runtime::StringDescriptor::__new(
+                #runtime::StringEncoding::U16C, #capacity, None,
+                #support_runtime::__private::U16CStrWire::<#capacity>::DATA_OFFSET,
+            ))
+        }
+        _ => unreachable!("only bounded string categories have a string descriptor"),
+    })
+}
+
+/// Collects the named constants for the nested array descriptors of one field.
+struct ArrayDescriptorSink<'a> {
+    field: &'a str,
+    level: usize,
+    constants: &'a mut Vec<TokenStream>,
+}
+
+/// Emits the `ArrayElementKind` of one array element category. A nested array
+/// element borrows an associated `ArrayDescriptor` constant whose stride is the
+/// compiler size of the inner element wire.
+fn array_element_kind(
+    element: &FieldCategory,
+    element_ty: &Type,
+    endian_default: Endian,
+    runtime: &Path,
+    support_runtime: &Path,
+    sink: &mut ArrayDescriptorSink<'_>,
+) -> syn::Result<TokenStream> {
+    let endian = endian_default.runtime_variant();
+    Ok(match element {
+        FieldCategory::Primitive(primitive) => {
+            let primitive = primitive.runtime_variant();
+            quote!(#runtime::ArrayElementKind::Primitive { primitive: #runtime::PrimitiveKind::#primitive, endian: #runtime::Endian::#endian })
+        }
+        FieldCategory::Bool => quote!(#runtime::ArrayElementKind::Bool),
+        FieldCategory::Path { .. } => {
+            let ty = analyze::erased_source_type(element_ty);
+            quote!(match <#ty as #runtime::__private::WireType>::LAYOUT.kind() {
+                #runtime::TypeKind::ScalarEnum { .. } => #runtime::ArrayElementKind::ScalarEnum {
+                    layout: <#ty as #runtime::__private::WireType>::LAYOUT,
+                },
+                _ => #runtime::ArrayElementKind::Schema {
+                    layout: <#ty as #runtime::__private::WireType>::LAYOUT,
+                },
+            })
+        }
+        string if string.is_string() => {
+            let descriptor = string_descriptor(string, runtime, support_runtime)?;
+            quote!(#runtime::ArrayElementKind::String(#descriptor))
+        }
+        FieldCategory::Array {
+            element: inner,
+            length,
+        } => {
+            let Type::Array(inner_array) = element_ty else {
+                return Err(Error::new(
+                    element_ty.span(),
+                    "internal zero-schema array analysis mismatch",
+                ));
+            };
+            let inner_wire = wire_type(
+                inner,
+                &analyze::erased_source_type(&inner_array.elem),
+                support_runtime,
+                endian_default,
+            )?;
+            let name = format_ident!(
+                "__ZERO_SCHEMA_ARRAY_{}_{}",
+                sink.field.to_uppercase(),
+                sink.level
+            );
+            let inner_kind = array_element_kind(
+                inner,
+                &inner_array.elem,
+                endian_default,
+                runtime,
+                support_runtime,
+                &mut ArrayDescriptorSink {
+                    field: sink.field,
+                    level: sink.level + 1,
+                    constants: &mut *sink.constants,
+                },
+            )?;
+            let length = length.expression();
+            sink.constants.push(quote!(
+                const #name: #runtime::ArrayDescriptor = #runtime::ArrayDescriptor::__new(
+                    #inner_kind, #length, ::core::mem::size_of::<#inner_wire>(),
+                );
+            ));
+            quote!(#runtime::ArrayElementKind::Array(&Self::#name))
+        }
+        _ => {
+            return Err(Error::new(
+                element_ty.span(),
+                "internal zero-schema array analysis mismatch",
+            ));
         }
     })
 }
@@ -1424,12 +1542,17 @@ fn nonzero_assertions_category(category: &FieldCategory) -> Vec<TokenStream> {
         FieldCategory::FixedBytes {
             length: ArrayLength::Symbolic(length),
             ..
-        }
-        | FieldCategory::Array {
-            length: ArrayLength::Symbolic(length),
-            ..
         } => vec![quote!(assert!(#length > 0, "zero-length schema arrays are unsupported");)],
-        FieldCategory::Array { element, .. } => nonzero_assertions_category(element),
+        FieldCategory::Array { element, length } => {
+            let mut assertions = Vec::new();
+            if let ArrayLength::Symbolic(length) = length {
+                assertions.push(
+                    quote!(assert!(#length > 0, "zero-length schema arrays are unsupported");),
+                );
+            }
+            assertions.extend(nonzero_assertions_category(element));
+            assertions
+        }
         FieldCategory::Optional { inner, .. } => nonzero_assertions_category(inner),
         _ => Vec::new(),
     }

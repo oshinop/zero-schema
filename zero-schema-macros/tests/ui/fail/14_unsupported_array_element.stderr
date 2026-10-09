@@ -1,5 +1,5 @@
-error: array elements must be primitives, bool, scalar enums, or finite nested schemas
+error: array elements must be primitives, bool, scalar enums, finite nested schemas, bounded borrowed strings (&str, &CStr, &U16Str, &U16CStr), or nested fixed arrays of those
  --> tests/ui/fail/14_unsupported_array_element.rs:5:14
   |
-5 |     values: [&'a str; 2],
+5 |     values: [&'a [u8; 2]; 2],
   |              ^

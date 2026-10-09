@@ -186,8 +186,59 @@ impl FieldCategory {
             | Self::BorrowedU16Str { lifetime, .. }
             | Self::BorrowedU16CStr { lifetime, .. }
             | Self::FixedBytes { lifetime, .. } => Some(lifetime),
+            Self::Array { element, .. } => element.direct_lifetime(),
             _ => None,
         }
+    }
+
+    /// Whether this category is one of the four bounded borrowed string forms.
+    pub(crate) fn is_string(&self) -> bool {
+        matches!(
+            self,
+            Self::BorrowedStr { .. }
+                | Self::BorrowedCStr { .. }
+                | Self::BorrowedU16Str { .. }
+                | Self::BorrowedU16CStr { .. }
+        )
+    }
+
+    /// Declared `#[zero(capacity = N)]` of a bounded string category, in the
+    /// storage units of its logical string (bytes for `str`/`CStr`, `u16` units for
+    /// `U16Str`/`U16CStr`); `None` for every other category.
+    pub(crate) fn string_capacity(&self) -> Option<usize> {
+        match self {
+            Self::BorrowedStr { capacity, .. }
+            | Self::BorrowedCStr { capacity, .. }
+            | Self::BorrowedU16Str { capacity, .. }
+            | Self::BorrowedU16CStr { capacity, .. } => Some(*capacity),
+            _ => None,
+        }
+    }
+
+    /// For an array category, the innermost non-array element category and the
+    /// total array nesting depth (`1` for a plain `[T; N]`).
+    pub(crate) fn array_leaf(&self) -> Option<(&FieldCategory, usize)> {
+        let Self::Array { element, .. } = self else {
+            return None;
+        };
+        let mut depth = 1;
+        let mut leaf = element.as_ref();
+        while let Self::Array { element, .. } = leaf {
+            depth += 1;
+            leaf = element.as_ref();
+        }
+        Some((leaf, depth))
+    }
+
+    fn array_leaf_mut(&mut self) -> Option<&mut FieldCategory> {
+        let Self::Array { element, .. } = self else {
+            return None;
+        };
+        let mut leaf = element.as_mut();
+        while let Self::Array { element, .. } = leaf {
+            leaf = element.as_mut();
+        }
+        Some(leaf)
     }
 }
 
@@ -649,33 +700,8 @@ fn classify_field(
         return Ok(FieldCategory::Bool);
     }
     if let Some((lifetime, target)) = borrowed_target(ty) {
-        if is_single_ident(target, "str") {
-            return Ok(FieldCategory::BorrowedStr {
-                capacity: required_capacity(options, ty.span())?,
-                len_type: length_type(options),
-                endian: Endian::Native,
-                lifetime,
-            });
-        }
-        if is_single_ident(target, "CStr") {
-            return Ok(FieldCategory::BorrowedCStr {
-                capacity: required_capacity(options, ty.span())?,
-                lifetime,
-            });
-        }
-        if is_single_ident(target, "U16Str") {
-            return Ok(FieldCategory::BorrowedU16Str {
-                capacity: required_capacity(options, ty.span())?,
-                len_type: length_type(options),
-                endian: Endian::Native,
-                lifetime,
-            });
-        }
-        if is_single_ident(target, "U16CStr") {
-            return Ok(FieldCategory::BorrowedU16CStr {
-                capacity: required_capacity(options, ty.span())?,
-                lifetime,
-            });
+        if let Some(category) = borrowed_string(lifetime.clone(), target, options, ty.span())? {
+            return Ok(category);
         }
         if let Type::Array(array) = target {
             if is_single_ident(&array.elem, "u8") {
@@ -695,7 +721,7 @@ fn classify_field(
     }
     if let Type::Array(array) = ty {
         let length = array_length(array)?;
-        let element = classify_array_element(&array.elem)?;
+        let element = classify_array_element(&array.elem, options)?;
         return Ok(FieldCategory::Array {
             element: Box::new(element),
             length,
@@ -834,6 +860,13 @@ fn apply_field_options(
     default_endian: Endian,
     span: Span,
 ) -> syn::Result<()> {
+    // A fixed array of bounded strings applies the field's string options to
+    // every element, so the innermost string category receives them.
+    if let Some(leaf) = category.array_leaf_mut() {
+        if leaf.is_string() {
+            return apply_field_options(leaf, options, default_endian, span);
+        }
+    }
     let field_endian = options
         .endian
         .as_ref()
@@ -922,7 +955,7 @@ fn apply_field_options(
     Ok(())
 }
 
-fn classify_array_element(ty: &Type) -> syn::Result<FieldCategory> {
+fn classify_array_element(ty: &Type, options: &FieldOptions) -> syn::Result<FieldCategory> {
     if path_ends_in_option(ty) {
         return Err(Error::new(
             ty.span(),
@@ -935,6 +968,19 @@ fn classify_array_element(ty: &Type) -> syn::Result<FieldCategory> {
     if bool_type(ty) {
         return Ok(FieldCategory::Bool);
     }
+    if let Some((lifetime, target)) = borrowed_target(ty) {
+        if let Some(category) = borrowed_string(lifetime, target, options, ty.span())? {
+            return Ok(category);
+        }
+    }
+    if let Type::Array(array) = ty {
+        let length = array_length(array)?;
+        let element = classify_array_element(&array.elem, options)?;
+        return Ok(FieldCategory::Array {
+            element: Box::new(element),
+            length,
+        });
+    }
     if matches!(ty, Type::Path(_)) {
         return Ok(FieldCategory::Path {
             tagged: false,
@@ -943,8 +989,46 @@ fn classify_array_element(ty: &Type) -> syn::Result<FieldCategory> {
     }
     Err(Error::new(
         ty.span(),
-        "array elements must be primitives, bool, scalar enums, or finite nested schemas",
+        "array elements must be primitives, bool, scalar enums, finite nested schemas, bounded borrowed strings (&str, &CStr, &U16Str, &U16CStr), or nested fixed arrays of those",
     ))
+}
+
+/// Classifies one of the four bounded borrowed string forms. The field's
+/// `capacity` and `len_type` describe the string itself, or every element of a
+/// fixed array of strings.
+fn borrowed_string(
+    lifetime: Lifetime,
+    target: &Type,
+    options: &FieldOptions,
+    span: Span,
+) -> syn::Result<Option<FieldCategory>> {
+    Ok(Some(if is_single_ident(target, "str") {
+        FieldCategory::BorrowedStr {
+            capacity: required_capacity(options, span)?,
+            len_type: length_type(options),
+            endian: Endian::Native,
+            lifetime,
+        }
+    } else if is_single_ident(target, "CStr") {
+        FieldCategory::BorrowedCStr {
+            capacity: required_capacity(options, span)?,
+            lifetime,
+        }
+    } else if is_single_ident(target, "U16Str") {
+        FieldCategory::BorrowedU16Str {
+            capacity: required_capacity(options, span)?,
+            len_type: length_type(options),
+            endian: Endian::Native,
+            lifetime,
+        }
+    } else if is_single_ident(target, "U16CStr") {
+        FieldCategory::BorrowedU16CStr {
+            capacity: required_capacity(options, span)?,
+            lifetime,
+        }
+    } else {
+        return Ok(None);
+    }))
 }
 
 fn primitive(ty: &Type) -> Option<Primitive> {
@@ -1282,7 +1366,10 @@ fn validate_generated_names(
             for name in [
                 "access",
                 "access_mut",
+                "access_prefix",
+                "access_mut_prefix",
                 "SCHEMA_SIZE",
+                "ZERO_IS_VALID",
                 "SCHEMA_ALIGN",
                 "SCHEMA_STRIDE",
                 "LAYOUT",
@@ -1302,7 +1389,10 @@ fn validate_generated_names(
             for name in [
                 "access",
                 "access_mut",
+                "access_prefix",
+                "access_mut_prefix",
                 "SCHEMA_SIZE",
+                "ZERO_IS_VALID",
                 "SCHEMA_ALIGN",
                 "SCHEMA_STRIDE",
                 "LAYOUT",
@@ -1845,6 +1935,122 @@ mod tests {
             }
         ))
         .unwrap();
+    }
+
+    #[test]
+    fn array_string_options_apply_to_the_innermost_string_element() {
+        let ir = analyze_item(quote!(
+            #[zero(endian = "little")]
+            struct Names<'a> {
+                #[zero(capacity = 7, len_type = u16, endian = "big")]
+                text: [[&'a str; 2]; 3],
+                #[zero(capacity = 5)]
+                wide: [&'a U16CStr; 4],
+            }
+        ))
+        .unwrap();
+        let (leaf, depth) = ir.fields[0].category.array_leaf().unwrap();
+        assert_eq!(depth, 2);
+        match leaf {
+            FieldCategory::BorrowedStr {
+                capacity,
+                len_type,
+                endian,
+                ..
+            } => {
+                assert_eq!(*capacity, 7);
+                assert_eq!(len_type, "u16");
+                assert_eq!(*endian, Endian::Big);
+            }
+            _ => panic!("the nested string leaf keeps its options"),
+        }
+        assert!(matches!(
+            ir.fields[1].category.array_leaf(),
+            Some((FieldCategory::BorrowedU16CStr { capacity: 5, .. }, 1))
+        ));
+    }
+
+    #[test]
+    fn array_element_lifetimes_count_as_borrowed_source_lifetimes() {
+        let source = || {
+            quote!(
+                struct Pair<'a, 'b> {
+                    #[zero(capacity = 2)]
+                    first: [&'a CStr; 2],
+                    #[zero(capacity = 2)]
+                    second: &'b CStr,
+                }
+            )
+        };
+        let error = error_of(analyze_item(source()));
+        assert!(
+            error
+                .to_string()
+                .contains("multiple borrowed source lifetimes")
+        );
+        analyze(quote!(borrow = 'a), syn::parse2(source()).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn array_elements_reject_unsupported_shapes_and_misplaced_string_options() {
+        for (source, expected) in [
+            (
+                quote!(
+                    struct Bad<'a> {
+                        values: [&'a [u8; 2]; 2],
+                    }
+                ),
+                "array elements must be",
+            ),
+            (
+                quote!(
+                    struct Bad<'a> {
+                        values: [[&'a str; 2]; 2],
+                    }
+                ),
+                "require #[zero(capacity = N)]",
+            ),
+            (
+                quote!(
+                    struct Bad {
+                        #[zero(capacity = 2)]
+                        values: [[u8; 2]; 2],
+                    }
+                ),
+                "not applicable",
+            ),
+            (
+                quote!(
+                    struct Bad<'a> {
+                        #[zero(capacity = 2, len_type = u8)]
+                        values: [&'a CStr; 2],
+                    }
+                ),
+                "not applicable",
+            ),
+            (
+                quote!(
+                    struct Bad {
+                        values: [[u8; 0]; 2],
+                    }
+                ),
+                "zero-length",
+            ),
+            (
+                quote!(
+                    struct Bad {
+                        values: Option<[[Kind; 2]; 2]>,
+                    }
+                ),
+                "Option<[T; N]> requires",
+            ),
+        ] {
+            let error = error_of(analyze_item(source));
+            assert!(
+                error.to_string().contains(expected),
+                "`{error}` should contain `{expected}`"
+            );
+        }
     }
 
     #[test]

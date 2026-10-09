@@ -35,7 +35,7 @@ publish=false
 [workspace]
 [dependencies]
 zs={package="zero-schema",path="$rroot",default-features=false}
-zerocopy={version="=0.8.54",default-features=false,features=["derive"]}
+zerocopy={version="0.8.54",default-features=false,features=["derive"]}
 [patch.crates-io]
 zero-schema-macros={path="$mroot"}
 EOF

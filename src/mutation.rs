@@ -172,6 +172,25 @@ where
         }
     }
 
+    /// Returns the field's declared `#[zero(capacity = N)]` as read-only metadata.
+    ///
+    /// The count is in the storage units of the logical string type: bytes for
+    /// `str` and `CStr`, and `u16` units for `U16Str` and `U16CStr`. It is the
+    /// whole declared data capacity, not the current length, and it is fixed
+    /// for the field regardless of the active value:
+    ///
+    /// - `CStr` and `U16CStr` capacities **include** the terminating NUL, so the
+    ///   longest accepted value has `capacity() - 1` units before its terminator.
+    /// - `str` and `U16Str` capacities **exclude** the length prefix, so a value
+    ///   of up to `capacity()` units is accepted.
+    ///
+    /// This is metadata only. [`StringMut::set`] still rejects a longer value
+    /// with a capacity error; no setter truncates or otherwise adapts its input.
+    #[inline]
+    pub const fn capacity(&self) -> usize {
+        Adapter::CAPACITY
+    }
+
     /// Replaces the active string without clearing unused capacity.
     #[inline]
     pub fn set(
@@ -542,6 +561,7 @@ mod tests {
         type Wire = StrWire<U8, 4>;
         type Owner = TestOwner;
         type Logical = str;
+        const CAPACITY: usize = 4;
 
         fn read<'wire>(
             input: SharedInput<'wire, Self::Wire>,

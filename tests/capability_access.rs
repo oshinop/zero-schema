@@ -9,7 +9,9 @@ use core::mem::{align_of, size_of};
 
 use capabilities::{AllFeatures, ConfigKind, Priority};
 use widestring::{U16CStr, U16Str};
-use zero_schema::{ArrayElementKind, Endian, FieldKind, LengthRepr, StringEncoding};
+use zero_schema::{
+    ArrayElementKind, Endian, ErrorKind, FieldKind, LengthRepr, SchemaError, StringEncoding,
+};
 
 #[test]
 fn producer_bytes_expose_borrowed_capabilities_and_layout_metadata() {
@@ -190,4 +192,66 @@ fn short_mutable_reborrows_update_only_constrained_fields() {
         (0x4444, b"hdr".as_slice())
     );
     assert_eq!(refreshed.samples().copy_into(), [19, 21, 23]);
+}
+
+#[test]
+fn string_mut_reports_declared_capacity_in_storage_units_without_truncating() {
+    let mut fixture = producer::all_features_mut();
+    let mut view = AllFeatures::access_mut(fixture.as_bytes_mut()).unwrap();
+
+    // `capacity()` is the declared `#[zero(capacity = N)]`, in the units of the
+    // logical string, and agrees with the diagnostic layout metadata.
+    let layout_capacity = |index: usize| match AllFeatures::LAYOUT.fields()[index].kind() {
+        FieldKind::String(string) => string.capacity(),
+        _ => panic!("field {index} must be string metadata"),
+    };
+    assert_eq!(
+        [
+            view.name_mut().capacity(),
+            view.c_name_mut().capacity(),
+            view.wide_mut().capacity(),
+            view.wide_c_mut().capacity(),
+            view.header_mut().producer_mut().capacity(),
+        ],
+        [7, 6, 2, 3, 6]
+    );
+    assert_eq!(
+        [3, 4, 5, 6].map(layout_capacity),
+        [7, 6, 2, 3],
+        "StringMut and LAYOUT report one declared capacity"
+    );
+
+    // A length-prefixed form accepts `capacity()` units; a terminated form's
+    // capacity includes its terminator, so one unit fewer. Nothing is truncated.
+    view.name_mut().set("abcdefg").unwrap();
+    let error = view.name_mut().set("abcdefgh").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::CapacityExceeded);
+    assert_eq!(view.name(), "abcdefg");
+
+    view.c_name_mut().set(c"abcde").unwrap();
+    let error = view.c_name_mut().set(c"abcdef").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::CapacityExceeded);
+    assert_eq!(view.c_name().to_bytes(), b"abcde");
+
+    view.wide_mut().set(U16Str::from_slice(&[1, 2])).unwrap();
+    let error = view
+        .wide_mut()
+        .set(U16Str::from_slice(&[1, 2, 3]))
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::CapacityExceeded);
+    assert_eq!(view.wide().as_slice(), &[1, 2]);
+
+    view.wide_c_mut()
+        .set(U16CStr::from_slice(&[1, 2, 0]).unwrap())
+        .unwrap();
+    let error = view
+        .wide_c_mut()
+        .set(U16CStr::from_slice(&[1, 2, 3, 0]).unwrap())
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::CapacityExceeded);
+    assert_eq!(view.wide_c().as_slice(), &[1, 2]);
+
+    // The capacity is a property of the field, not of its active value.
+    assert_eq!(view.name_mut().capacity(), 7);
+    assert_eq!(view.c_name_mut().capacity(), 6);
 }

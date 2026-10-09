@@ -1,9 +1,9 @@
 # `zero-schema`: checked zero-copy wire capabilities
 
 **Status:** design RFC  
-**Document version:** 0.12  
-**Date:** 2026-07-15  
-**Reference implementation baseline:** `zerocopy` 0.8.54 and `widestring` 1.2.1  
+**Document version:** 0.14  
+**Date:** 2026-10-08  
+**Dependency baseline:** minimum `zerocopy` 0.8.54 and `widestring` 1.2.1, as compatible-release requirements (§19.6)  
 **Supersedes for review:** the materializing v0.2 proposal, copy-interop v0.9 draft, and aggregate-copy v0.10 draft
 
 > **Scope.** `zero-schema` gives Rust code checked, zero-copy access to an
@@ -61,6 +61,11 @@ small read capability. `access_mut` proves the same facts before returning an
 exclusive mutation capability. Neither creates a record from bytes. There is no
 public raw-wire reference, raw union mutation, delayed validity checkpoint, or
 Rust-originated initialization path.
+
+`access_prefix` and `access_mut_prefix` apply exactly those proofs to the leading
+`SCHEMA_SIZE` bytes of a longer span and return the bytes after them untouched, for
+callers whose span is larger than the selected schema (for example a union-sized
+payload span).
 
 The API names aggregate movement by direction relative to the checked wire
 capability. `copy_into` moves checked wire into the concrete logical return type
@@ -192,6 +197,8 @@ The initial design provides:
   scalar enums, and closed tagged enums;
 - `Schema::access(&[u8]) -> Result<SchemaRef<'_>, _>` and
   `Schema::access_mut(&mut [u8]) -> Result<SchemaMut<'_>, _>`;
+- `Schema::access_prefix` and `Schema::access_mut_prefix`, which prove exactly the
+  leading `SCHEMA_SIZE` bytes of a longer span and return the remainder;
 - eager checking before a read or mutable capability is returned;
 - compact, opaque root capabilities and temporary short-reborrow field mutation
   capabilities rather than stored public field proxies;
@@ -208,8 +215,11 @@ The initial design provides:
 - private `*Wire` representations formed through `zerocopy` and checked byte
   operations;
 - generated allocation-free access and mutation errors;
-- `SCHEMA_SIZE`, `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, layout metadata, named
-  `schema_buffer!` types, and `make_schema_buffer!` values;
+- `SCHEMA_SIZE`, `SCHEMA_ALIGN`, `SCHEMA_STRIDE`, the exact compile-time
+  `ZERO_IS_VALID`, layout metadata, named `schema_buffer!` types,
+  `make_schema_buffer!` values, checked zero-start `make_zeroed_schema_buffer!`
+  values, and, under `alloc`, heap-allocated `make_boxed_schema_buffer!` and
+  `make_zeroed_boxed_schema_buffer!` values;
 - no handwritten `unsafe` in runtime, macro crate, or emitted implementation;
   and
 - `#![no_std]` core support and C/C++ ABI verification.
@@ -363,9 +373,36 @@ let message = Message::access(slot.as_bytes())?;
 exactly `Message::SCHEMA_SIZE` initialized bytes; `make_schema_buffer!(Message)`
 constructs that type. Neither performs a validity proof or initializes a logical
 schema: callers must use `access` to decide whether the current bytes are valid. A
-schema whose complete
-zero bytes satisfy every declared rule (for example, an all-optional root) can
-therefore access as valid absence; other schemas still require producer data.
+schema whose complete zero bytes satisfy every declared rule (for example, an
+all-optional root) therefore accesses as valid; §9.5 defines that property exactly as
+`ZERO_IS_VALID`, and `make_zeroed_schema_buffer!(Message)` is the constructor that
+requires it at compile time:
+
+```rust
+use zero_schema::make_zeroed_schema_buffer;
+
+let mut slot = make_zeroed_schema_buffer!(Status); // fails to compile unless
+                                                   // Status::ZERO_IS_VALID
+let status = Status::access(slot.as_bytes())?;     // first access succeeds
+```
+
+For a root too large to keep comfortably on a stack, the `alloc` feature adds the same
+storage on the heap:
+
+```rust
+use zero_schema::make_boxed_schema_buffer;
+
+let mut slot: Box<MessageBuffer> = make_boxed_schema_buffer!(Message);
+receive_producer_bytes(slot.as_bytes_mut())?;
+let message = Message::access(slot.as_bytes())?;
+```
+
+`make_boxed_schema_buffer!(Message)` (equivalently `MessageBuffer::new_boxed()`) has
+the semantics of `make_schema_buffer!(Message)` — initialized zero bytes, no implied
+validity — but allocates the zeroed buffer directly on the heap, so no temporary of
+`SCHEMA_SIZE` bytes is formed on the stack. `make_zeroed_boxed_schema_buffer!(Message)`
+is the same placement with the zero-validity requirement of
+`make_zeroed_schema_buffer!`.
 
 ## 5. Core concepts
 
@@ -519,6 +556,8 @@ duplicate, contradictory, misplaced, or inapplicable options are macro errors.
 | nested schema | inline child `*Wire` | `ChildRef<'_>` |
 | `Option<T>` | complete `T` StorageWire; no presence byte | `Option<inner read>` |
 | `[T; N]` | `[T::Wire; N]` | `ArrayRef<'_, T, N>` |
+| `[S; N]` for `S` any bounded string form | `[S::Wire; N]` | `ArrayRef<'_, &S, N>` (zero-copy borrowed string per element) |
+| `[[T; N]; M]` (any depth) | `[[T::Wire; N]; M]` | `ArrayRef<'_, ArrayRef<'_, T, N>, M>` |
 | tagged union | sibling scalar tag plus union-sized payload | `UnionRef<'_>` |
 
 `String`, `Vec<T>`, `Box<T>`, maps, unsized arrays, arbitrary tuples, raw
@@ -558,6 +597,9 @@ physical field states, and a nonempty array has its element state. Optional
 fields contribute `ZeroValid`. A tagged payload is `ZeroInvalid` only when
 every variant payload is `ZeroInvalid`; a unit or zero-valid variant makes it
 `ZeroValid`. `ZeroInvalid::Or<R>` remains `ZeroInvalid`; `ZeroValid::Or<R>` is `R`.
+This calculation is the *conservative* rejection test for optional inners, not the
+exact zero-validity constant of §9.5: for every declaration except a tagged payload the
+two agree, while a tagged payload is classified without looking at the external tag.
 The public source rule is the
 doc-hidden blanket refinement `OptionalWireType: WireTypeSupport<ZeroState =
 ZeroInvalid>`; callers neither implement the marker nor receive a raw wire
@@ -581,9 +623,9 @@ The inner type supplies its own supported schema or enum representation.
 
 | Option | Valid categories | Additional conditions |
 |---|---|---|
-| `capacity` | four borrowed string forms | required exactly once there and forbidden elsewhere |
-| `len_type` | `str`, `U16Str` | `u8`, `u16`, or `u32`; capacity must fit |
-| `endian` | direct numeric storage and prefixed string length | nested and scalar enum types retain their own form |
+| `capacity` | four borrowed string forms, or a fixed array of them | required exactly once there and forbidden elsewhere; for an array it applies to every element |
+| `len_type` | `str`, `U16Str`, or a fixed array of them | `u8`, `u16`, or `u32`; capacity must fit |
+| `endian` | direct numeric storage, prefixed string length, and arrays of prefixed strings | nested and scalar enum types retain their own form; arrays of numbers, Booleans, and schemas still reject it |
 | `align` | any supported field | supported power of two; the only field option permitted on `Option<T>` |
 | `tag_field` | every tagged-union field | required; names one unique matching scalar-enum sibling |
 
@@ -600,14 +642,36 @@ one union field is therefore a required layout and mutation invariant.
 
 ### 6.7 Fixed arrays
 
-A field `[T; N]` is allowed when `T` is an allowed scalar, scalar enum, or nested
-schema and `N` is a nonzero layout-supported const expression. Its physical field
-is exactly `[T::Wire; N]` with contiguous `size_of::<T::Wire>()` stride.
+A field `[T; N]` is allowed when `T` is an allowed scalar, scalar enum, nested
+schema, bounded borrowed string, or fixed array of any of those, and `N` is a nonzero
+layout-supported const expression. Its physical field is exactly `[T::Wire; N]` with
+contiguous `size_of::<T::Wire>()` stride; `[T; 0]` remains forbidden at every level.
 
 `samples()` returns an O(1)-state `ArrayRef<'_, T, N>`. `get(index)` and
 `iter()` stay zero-copy. `copy_into()` explicitly constructs `[LogicalT; N]`.
 Access proves every element in increasing index order before it returns the
 parent capability.
+
+**Arrays of bounded strings.** `[&'b str; N]`, `[&'b CStr; N]`, `[&'b U16Str; N]`,
+and `[&'b U16CStr; N]` take the field's `capacity` (and `len_type`/`endian` where the
+string form has a length prefix) as the declaration of every element. An element's
+wire is exactly that string's wire and the stride is its compiler size, so, where
+`wchar_t` is a 16-bit unit (for example MSVC), `wchar_t names[4][49]` is
+`#[zero(capacity = 49)] names: [&'b U16CStr; 4]` and
+`wchar_t nick[2][41]` is `[&'b U16CStr; 2]` with capacity 41. The read type is the
+borrowed string itself: `get(index)` yields `Option<&'b U16CStr>` into the producer
+bytes and `copy_into()` yields `[&'b U16CStr; N]`, the declared logical array. Each
+element obeys the single-string proof rules; unused capacity after a terminator or
+length prefix is never inspected.
+
+**Arrays of arrays.** `[[T; N]; M]` is the row-major C/C++ multidimensional array
+`T x[M][N]`: the wire is `[[T::Wire; N]; M]`, the outer stride is the inner array's
+whole wire size, and nesting may continue to any depth. The outer element read is
+the inner `ArrayRef` (or, from `ArrayMut`, an inner `ArrayMut`), so a row is still an
+O(1)-state view; the record-level `copy_into()` and patches use the declared logical
+value `[[T; N]; M]`. A nested array of strings applies the field's string options
+to the innermost element. Optional fields keep their §6.5 rule, so `Option` of a
+nested or string array is rejected.
 
 ### 6.8 Scalar enums
 
@@ -681,12 +745,24 @@ exactly the active prefix. A C-string field is `[u8; N]` and requires an
 in-capacity terminator. Native `u16` unit storage follows `widestring`
 borrowed-view semantics. Bytes after a prefix or terminator are unused capacity.
 
+`#[zero(capacity = N)]` declares the data capacity in the storage units of the
+logical string: bytes for `str` and `CStr`, and `u16` units for `U16Str` and
+`U16CStr`. A C-string form's capacity **includes** its terminator, so its longest value
+has `N - 1` units; a length-prefixed form's capacity **excludes** its prefix, so its
+longest value has `N` units. The declared value is exposed read-only as
+`StringMut::capacity()` (§8.4) and `StringDescriptor::capacity()` (§19.4).
+
 ### 7.3 Fixed bytes, arrays, and nested schemas
 
 `&[u8; N]` borrows exact storage and needs no content test. A fixed array is
-`[T::Wire; N]`, never `[T; N]`; Boolean elements, enum elements, and nested
-elements receive their relevant checks. The first failed element reports an
-indexed path. A nested field is inline child wire storage, not a pointer or a
+`[T::Wire; N]`, never `[T; N]`; Boolean elements, enum elements, string elements, and
+nested elements receive their relevant checks. The first failed element reports an
+indexed path: `field[i]` for one dimension and `field[i][j]...` for a nested array,
+with every enclosing index. A string element is the string's own wire, so its
+terminator or length prefix is checked only within that element's capacity and the
+next element begins at the compiler-derived stride with no inter-element padding
+beyond the wire's own alignment. A nested array is the row-major
+multidimensional array. A nested field is inline child wire storage, not a pointer or a
 logical child value; the parent uses checked offsets and recursively proves the
 child.
 
@@ -754,6 +830,7 @@ payload bytes.
 ```rust
 impl Message {
     pub const SCHEMA_SIZE: usize;
+    pub const ZERO_IS_VALID: bool;
     pub const SCHEMA_ALIGN: usize;
     pub const SCHEMA_STRIDE: usize;
     pub const LAYOUT: LayoutDescriptor;
@@ -761,6 +838,11 @@ impl Message {
     pub fn access(bytes: &[u8]) -> Result<MessageRef<'_>, MessageAccessError>;
     pub fn access_mut(bytes: &mut [u8])
         -> Result<MessageMut<'_>, MessageAccessError>;
+
+    pub fn access_prefix(bytes: &[u8])
+        -> Result<(MessageRef<'_>, &[u8]), MessageAccessError>;
+    pub fn access_mut_prefix(bytes: &mut [u8])
+        -> Result<(MessageMut<'_>, &mut [u8]), MessageAccessError>;
 }
 ```
 
@@ -768,7 +850,23 @@ The byte span must have exactly `SCHEMA_SIZE` bytes at an address meeting
 `SCHEMA_ALIGN`. `SCHEMA_STRIDE` rounds wire size for aligned slot arrays.
 `LAYOUT` is diagnostic and ABI-verification metadata, not an interpreted runtime
 layout description. `access_mut` performs complete type checking and has no
-alternate initialization route.
+alternate initialization route. `ZERO_IS_VALID` is the exact compile-time answer to
+whether an all-zero span of `SCHEMA_SIZE` bytes is type-valid (§9.5); it never inspects
+bytes. `ZERO_IS_VALID` is a reserved generated name, so a record field or scalar-enum
+variant of that name is rejected with the generated-name collision diagnostic.
+
+`access_prefix` and `access_mut_prefix` take a span of at least `SCHEMA_SIZE` bytes. They
+prove exactly its leading `SCHEMA_SIZE` bytes with the same alignment rule and the same
+eager proof as `access` and `access_mut`, and return the capability together with the
+remaining bytes. The capability borrows and can reach only the proved prefix. The
+remainder is the caller's own tail of the span: it is returned as a plain slice that is
+disjoint from the prefix (shared for `access_prefix`, exclusive for `access_mut_prefix`),
+is never inspected, and carries no alignment requirement. A span of fewer than
+`SCHEMA_SIZE` bytes fails with `MessageAccessError::Layout` wrapping
+`LayoutError::InsufficientBytes { required: SCHEMA_SIZE, actual }`, reported before any
+alignment test. These entry points exist for a span larger than the schema, such as a
+union-sized payload span whose selected variant schema is smaller; exact slots keep
+using `access` and `access_mut`.
 
 ### 8.2 Field-named read API
 
@@ -861,6 +959,23 @@ Nested mutable capabilities repeat this pattern, so mutations naturally chain
 through checked child locations. There is no root-level field-setting operation,
 no stored public proxy per field, and no mutable handle for the sibling tag of an
 externally tagged union.
+
+A string handle also reports its declared capacity as read-only metadata:
+
+```rust
+impl<'view> StringMut<'view> {
+    pub const fn capacity(&self) -> usize;
+}
+```
+
+`capacity()` is the field's `#[zero(capacity = N)]` in the units defined in §7.2 — bytes
+for `str` and `CStr`, `u16` units for `U16Str` and `U16CStr`, terminator included for
+the C forms and length prefix excluded for the prefixed forms. It never depends on the
+active value and changes no state. It is metadata only: `set` still rejects a longer
+value with a capacity error and no setter truncates, so shortening a value to fit is
+application logic. A string getter returns the borrowed `&str`, `&CStr`, `&U16Str`, or
+`&U16CStr` directly rather than a capability, so the read side exposes the same declared
+value through `LAYOUT` (`StringDescriptor::capacity()`).
 
 ### 8.5 Logical aggregate movement
 
@@ -1022,6 +1137,25 @@ provide no range operation, no checked-view movement, and no checked-element
 movement. `get_mut(index)` returns a constrained mutable nested-element
 capability when `T` is nested; it never returns mutable private wire storage.
 
+**String and nested elements.** For `[&'b U16CStr; N]` the element read and write
+type is the borrowed string: `get(index)` and `iter()` yield `&'b U16CStr` into the
+producer bytes, `set(index, &U16CStr)` and `copy_from(&[&U16CStr])` take borrowed
+strings, and `get_mut(index)` returns that element's `StringMut`, with the same
+preserve-unused-capacity rule as a string field: only the active prefix and its
+terminator are written. `copy_from` requires exactly `N` elements, preflights every
+element in increasing order, and only then commits, so a rejected later string leaves
+the whole array unchanged. A rejected element reports `field[index]`; a rejected
+`StringMut::set` on an extracted element reports a field-level failure, as a string
+field does.
+
+For `[[T; N]; M]`, `get(i)` yields the row `ArrayRef<'_, T, N>` and `get_mut(i)`
+yields the row `ArrayMut<'_, T, N>`. `set(i, [T; N])` and `copy_from(&[[T; N]])`
+move whole rows with the same exact-length, preflight-everything-then-commit rule
+across all rows. A row handle knows its flat origin, so a rejected element reports
+every enclosing index (`field[i][j]`); an out-of-range index reports the offending
+index of the handle that rejected it. A row's `copy_into()` is its own `[T; N]`; the
+record-level `copy_into()` and patches materialize the declared `[[T; N]; M]`.
+
 ### 8.8 Union capabilities and patch movement
 
 A union field capability privately owns the protocol for its sibling tag plus
@@ -1081,13 +1215,40 @@ type whose byte view has `SCHEMA_SIZE` bytes at `SCHEMA_ALIGN`;
 that type. Callers may hand its mutable bytes to an external producer, but neither
 macro establishes type validity.
 
+Under `alloc`, `SchemaBuffer::new_boxed() -> Box<Self>` and
+`make_boxed_schema_buffer!(FullyConcreteSchema)` construct the same zero-filled value
+directly on the heap. The allocation is made already zeroed (through `zerocopy`'s
+`FromZeros::new_box_zeroed`, which `SchemaBuffer` derives), so no stack temporary of
+`SCHEMA_SIZE` bytes is formed, and it has the alignment of the inline buffer. The
+macro form performs the same fully-concrete-root compile-time checks as
+`make_schema_buffer!`. Allocation failure is reported like `Box::new`, through the
+global allocation-error handler. The bytes carry exactly the meaning of `new()`:
+initialized Rust memory with no implied schema validity until a producer fills them and
+`access` proves them.
+
+`make_zeroed_schema_buffer!(FullyConcreteSchema)` and, under `alloc`,
+`make_zeroed_boxed_schema_buffer!(FullyConcreteSchema)` are the checked zero-start
+counterparts. They apply the same fully-concrete-root checks and then require
+`FullyConcreteSchema::ZERO_IS_VALID` in a `const` assertion, so a root whose all-zero span
+is not type-valid (for example a scalar-enum field with no `= 0` discriminant) fails to
+compile with a message naming `ZERO_IS_VALID`; wrapping that field in `Option<_>`, or
+declaring a zero variant, repairs it. The result is the same `SchemaBuffer` value as
+`make_schema_buffer!` and is documented as type-valid until its bytes are changed:
+the first `access` or `access_mut` succeeds. There is no unchecked variant, no
+capability is produced by construction, and `access` and `access_mut` remain the only
+route to a capability: they still run the full eager proof of §9.1 on the zero bytes.
+Capability mutation preserves validity (§14.5); direct writes through
+`SchemaBuffer::as_bytes_mut` do not carry the promise.
+
 ## 9. Type-validity checking
 
 ### 9.1 Ordered check sequence
 
-`access` and `access_mut` use the same eager order:
+`access` and `access_mut` use the same eager order, and `access_prefix` and
+`access_mut_prefix` apply it to the leading `SCHEMA_SIZE` bytes of their span:
 
-1. check exact root length and alignment;
+1. check root length and alignment (exact length for `access`; at least `SCHEMA_SIZE`
+   for the prefix entry points, with a short span reported before alignment);
 2. form a private root wire view through `zerocopy`;
 3. inspect declared fields in declaration order;
 4. check constrained primitive encodings and scalar enum discriminants;
@@ -1106,7 +1267,7 @@ inactive payload bytes are not read; §7.4 is the precise optional-field excepti
 
 | Incoming condition | Result | Reason |
 |---|---|---|
-| wrong root length or insufficient alignment | error | a typed root location cannot be formed safely |
+| wrong root length (exact entry points), fewer than `SCHEMA_SIZE` bytes (prefix entry points), or insufficient alignment | error | a typed root location cannot be formed safely |
 | Boolean encoding other than `0` or `1` | error | no declared Rust Boolean may be returned |
 | scalar enum value absent from declaration | error | no declared enum value may be returned |
 | string length exceeds capacity or length form | error | bounded field view cannot be formed |
@@ -1116,6 +1277,7 @@ inactive payload bytes are not read; §7.4 is the precise optional-field excepti
 | selected payload, array element, or nested field invalid | error | its declared view cannot be exposed safely |
 | complete StorageWire of `Option<T>` | scanned | all zero is absent; nonzero eagerly proves `T` |
 | ordinary parent padding, unused capacity, inactive payload bytes | ignored | no declared operation reads them |
+| bytes after the leading `SCHEMA_SIZE` of a prefix entry point | ignored | outside the root; returned unexamined |
 
 ### 9.3 Why checking is eager
 
@@ -1138,6 +1300,46 @@ let message = Message::access(&mapping[offset..limit])?;
 
 The mapping base and stride must make the chosen location aligned. A byte
 subslice is not presumed aligned merely because its length is correct.
+
+When the available span is larger than the schema to be read — for example a
+union-sized payload span whose selected variant schema is smaller — the prefix entry
+points select the leading schema bytes and return the rest, instead of requiring the
+caller to slice by `SCHEMA_SIZE`:
+
+```rust
+let (message, rest) = Message::access_prefix(payload_span)?;
+```
+
+### 9.5 All-zero validity (`ZERO_IS_VALID`)
+
+Every generated record (root or nested) and scalar enum has `pub const ZERO_IS_VALID:
+bool`, and every generated record, scalar enum, and tagged payload implements the
+doc-hidden `WireTypeSupport::ZERO_IS_VALID` / `TaggedPayloadTypeSupport::ZERO_IS_VALID`
+constant that composes it. The value is **exact**: it is `true` if and only if an
+all-zero span of the schema's complete wire is accepted by the eager proof of §9.1. It is
+computed from the declaration, never from bytes, and is a true `const`, so
+`const { assert!(Root::ZERO_IS_VALID) }` is available for a concrete root.
+
+| Declaration | `ZERO_IS_VALID` |
+|---|---|
+| primitive integer or float, `bool`, `&[u8; N]` | `true` |
+| `&str`, `&CStr`, `&U16Str`, `&U16CStr` (any `len_type`/`endian`) | `true`: zero length, or an immediate terminator |
+| `Option<T>` | `true`: an all-zero span is `None` |
+| scalar enum | `true` iff some declared discriminant is `0` |
+| fixed array `[T; N]`, including arrays of strings and arrays of arrays | the element's value (`N` is nonzero) |
+| nested schema | that schema's `ZERO_IS_VALID` |
+| record | the conjunction of its fields |
+| tagged-union field | the external tag enum has a variant with discriminant `0` **and** that variant's payload is zero-valid (a unit payload always is) |
+
+Only the variant whose tag is `0` counts for a tagged payload: another variant being
+zero-valid does not help, and a zero tag that the payload declaration does not claim is an
+unknown tag. This is stricter than the conservative `ZeroState` of §6.5, which
+classifies a tagged payload as possibly zero-valid when any variant is.
+
+A generic record's value depends on its type arguments (it composes each argument's own
+`ZERO_IS_VALID`), exactly as `SCHEMA_SIZE` does. It can therefore be named only with
+every parameter supplied, for example `Holder::<Child>::ZERO_IS_VALID`; generic code that
+is still abstract over a schema parameter cannot assert it until instantiation.
 
 ## 10. Mutation and type preservation
 
@@ -1229,8 +1431,11 @@ must be known before any payload view exists.
 
 Safe root access requires the actual buffer address to meet `SCHEMA_ALIGN`.
 `SCHEMA_STRIDE` is size rounded to that alignment for repeated slots.
+A prefix entry point applies the same alignment rule to the first byte of its span.
 `schema_buffer!` names aligned owned receiving storage and `make_schema_buffer!`
-constructs it, but neither establishes type validity.
+constructs it (under `alloc`, `make_boxed_schema_buffer!` constructs it on the heap);
+`make_zeroed_schema_buffer!` and `make_zeroed_boxed_schema_buffer!` do the same only for
+roots whose `ZERO_IS_VALID` holds. None of them establishes type validity: `access` does.
 
 ### 12.2 Field alignment
 
@@ -1299,6 +1504,14 @@ Runtime code, macro code, and emitted implementation contain no handwritten
 pointer casts. Typed views and bounded byte inspection use `zerocopy` and checked
 safe operations.
 
+The `zerocopy` derives of generated wire forms resolve the consuming crate's direct
+dependency, which Cargo unifies with the runtime's own requirement (§19.6), so derived
+impls and runtime bounds name the same traits. Heap receiving storage derives
+`FromZeros` on `SchemaBuffer` and allocates through `FromZeros::new_box_zeroed`; this adds
+no handwritten `unsafe`. Prefix access splits the supplied slice with checked safe
+operations (`split_at_checked`, `split_at_mut_checked`) before forming any typed view,
+and returns a remainder that is disjoint from the proved prefix.
+
 ### 14.2 Rust values follow proof
 
 | Declared result | Private storage | Fact established first |
@@ -1342,7 +1555,9 @@ Before a direct operation writes, it preflights every fallible source, input, an
 selected-union condition. Whole patches and full array slices preflight the
 complete request before their first write. Normal field handles write only valid
 representations. A union patch writes payload before its coupled external tag.
-Thus success preserves type validity and an error preserves the prior wire.
+Thus success preserves type validity and an error preserves the prior wire. A
+zero-start buffer is type-valid exactly when `ZERO_IS_VALID` holds (§9.5), and the
+constructors add no code path that yields a capability without `access`.
 
 ## 15. Stable snapshots and concurrency
 
@@ -1481,6 +1696,11 @@ infallible after that proof. A field-local mutation error changes no byte. Patch
 and full-array-slice movement apply that guarantee to the entire request: any
 error leaves the complete prior wire unchanged.
 
+`access_prefix` and `access_mut_prefix` return the same `MessageAccessError`: a span of
+fewer than `SCHEMA_SIZE` bytes is `ErrorKind::Layout` (`LayoutError::InsufficientBytes`),
+and every other failure is the corresponding `access` failure on the leading prefix.
+Nothing is returned on failure, and `access_mut_prefix` writes nothing.
+
 No error category describes initialization of arbitrary mutable schema bytes,
 because the API never treats such bytes as an initial record.
 
@@ -1571,12 +1791,38 @@ enums, external tag relationships, variants, padding locations, and byte order.
 It is diagnostic and verification metadata, not a stable serialized fingerprint
 or header-emission protocol.
 
+A string array field's `ArrayDescriptor` has an `ArrayElementKind::String` element
+whose `StringDescriptor` offsets are relative to the element start, and a nested
+array has an `ArrayElementKind::Array` element borrowing the inner
+`ArrayDescriptor`; each descriptor's stride is the element wire's compiler size.
+
 ### 19.5 Features and allocation
 
 The core runtime is `#![no_std]`. Access, mutation, aggregate movement,
 complete optional-span scans and clears, `OptionMut`, capabilities, patches,
 errors, and metadata allocate nothing. Optional `alloc` and `std` conveniences
 do not change wire layout, the sentinel protocol, or the type-validity boundary.
+
+Under `alloc`, `SchemaBuffer::new_boxed`, `make_boxed_schema_buffer!`, and
+`make_zeroed_boxed_schema_buffer!` allocate their zero-filled receiving storage on the
+heap; that constructor, owned error-path formatting, and caller code are the only
+allocation points. Prefix access, `StringMut::capacity`, and the `ZERO_IS_VALID`
+constants allocate nothing.
+
+### 19.6 Dependency requirements
+
+`zero-schema` requires `zerocopy` `0.8.54` and `widestring` `1.2.1` as caret
+(compatible-release) requirements, not exact pins. Any later `0.8.x` `zerocopy` and any
+`1.x` `widestring` at or above the baseline is supported. Because those releases are
+semver-compatible, Cargo resolves the runtime and the consuming crate's direct
+`zerocopy` dependency to one release. Generated code relies only on the `FromBytes`,
+`KnownLayout`, and `Immutable` derives resolved through that direct dependency and names
+no release-specific `zerocopy` path; the runtime's `__private` surface re-exports no
+`zerocopy` item.
+
+The companion `zero-schema-macros` crate is deliberately different: `zero-schema`
+requires exactly `=0.1.0` of it. The runtime and the expansion it consumes, including the
+doc-hidden `__private` contract, are released and resolved in lockstep.
 
 ## 20. Test strategy
 
@@ -1587,6 +1833,12 @@ capacity/length bounds, unsupported shapes, `N = 0`, scalar discriminants,
 zero-sentinel Option spelling and rejection matrix, union variant tags, generated
 patch names, ambiguous lifetimes, invalid alignment, native-wide-string
 requirements, generic constraints, and generated-name collisions.
+Array coverage includes a string element without `capacity`, string options
+misapplied to numeric arrays, `capacity = 0` on a terminated-string array, a
+zero literal at any nesting level, a symbolic length that is zero at an inner level,
+and `Option` of a string or nested array. A zero-start buffer macro applied to a root
+whose enum has no `= 0` variant must fail to compile, while the `Option<Enum>` form
+compiles and runs, and `ZERO_IS_VALID` is a reserved generated name.
 
 Union diagnostics must specifically reject every tagged-union record field that
 omits `tag_field`, names an absent sibling, names a sibling of a different scalar
@@ -1609,7 +1861,11 @@ all-zero complete span to read `None`, a nonzero span to prove `Some`, and
 nonzero field-local padding with a zero-invalid value to fail. They also require
 failure for raw Boolean `2`, an undeclared scalar enum discriminant,
 over-capacity length, malformed UTF-8, missing terminator, unknown external
-union tag, and invalid selected nested or array content.
+union tag, and invalid selected nested or array content. An agreement test compares
+`ZERO_IS_VALID` of a table of schemas (enums with and without a zero variant, strings,
+optional fields, nested and array composition, tagged payloads whose zero tag selects
+a valid, invalid, unit, or unclaimed variant, generic and cross-crate children) with the
+eager proof of a freshly zeroed span.
 
 ### 20.3 Mutation and copy-from behavior
 
@@ -1638,7 +1894,8 @@ tag mutation, and absence of raw payload access.
 Arbitrary initialized byte input must never cause undefined behavior or a panic
 through safe access; invalid input returns a structured error. Miri covers root,
 nested, array, and union access; short shared reborrows from mutable roots;
-aggregate materialization; patches; full arrays; selected-payload mutation; and
+aggregate materialization; patches; full arrays; selected-payload mutation; prefix
+access with a disjoint exclusive remainder; heap receiving storage; and
 alignment rejection. A source audit rejects handwritten `unsafe` blocks, unsafe
 trait implementations, and unsafe operation bodies in runtime, macro crate, and
 emitted templates.
@@ -1685,7 +1942,8 @@ The initial release includes:
 - field-named reads, field-named mutable handles, `set`, `copy_into`, and
   `copy_from` as the complete active movement vocabulary;
 - generated `Default` patches and `From<Type> for TypePatch`;
-- exact layout constants, metadata, and optional aligned receiving storage;
+- exact layout constants, exact zero validity, metadata, and optional aligned receiving
+  storage including checked zero-start storage;
 - eager safe access, `no_std`, fuzzing, Miri, and C++ layout coverage; and
 - no handwritten unsafe implementation.
 
@@ -1978,12 +2236,17 @@ pub struct ExampleMut<'a> { /* checked exclusive private wire location */ }
 
 impl Example<'_> {
     pub const SCHEMA_SIZE: usize = core::mem::size_of::<ExampleWire>();
+    pub const ZERO_IS_VALID: bool = /* emitted: exact, from the declaration */;
     pub const SCHEMA_ALIGN: usize = core::mem::align_of::<ExampleWire>();
     pub const SCHEMA_STRIDE: usize = round_up(Self::SCHEMA_SIZE, Self::SCHEMA_ALIGN);
     pub const LAYOUT: LayoutDescriptor = /* emitted static metadata */;
 
     pub fn access(bytes: &[u8]) -> Result<ExampleRef<'_>, ExampleAccessError> { /* emitted */ }
     pub fn access_mut(bytes: &mut [u8]) -> Result<ExampleMut<'_>, ExampleAccessError> { /* emitted */ }
+    pub fn access_prefix(bytes: &[u8])
+        -> Result<(ExampleRef<'_>, &[u8]), ExampleAccessError> { /* emitted */ }
+    pub fn access_mut_prefix(bytes: &mut [u8])
+        -> Result<(ExampleMut<'_>, &mut [u8]), ExampleAccessError> { /* emitted */ }
 }
 
 impl<'a> ExampleRef<'a> {
@@ -2022,7 +2285,8 @@ contains no handwritten `unsafe`.
 
 # Appendix C: source references
 
-The design relies on these external guarantees and APIs as of this document date:
+The design relies on these external guarantees and APIs as of this document date. The
+links name the baseline releases; later compatible releases are supported (§19.6):
 
 1. [`zerocopy` crate documentation, version 0.8.54](https://docs.rs/zerocopy/0.8.54/zerocopy/)
 2. [`zerocopy::FromBytes`](https://docs.rs/zerocopy/0.8.54/zerocopy/trait.FromBytes.html)
@@ -2043,8 +2307,8 @@ The design relies on these external guarantees and APIs as of this document date
 ```text
 #[zero] logical Type
     ordinary fields / variants and user derives
-    access / access_mut
-    SCHEMA_SIZE / SCHEMA_ALIGN / SCHEMA_STRIDE / LAYOUT
+    access / access_mut / access_prefix / access_mut_prefix
+    SCHEMA_SIZE / SCHEMA_ALIGN / SCHEMA_STRIDE / ZERO_IS_VALID / LAYOUT
     │
     ├── TypeRef
     │     field() reads and nested / array / union capabilities

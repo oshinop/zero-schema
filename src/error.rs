@@ -100,6 +100,92 @@ pub fn __fmt_schema_error(error: &dyn SchemaError, f: &mut fmt::Formatter<'_>) -
     current.__fmt_leaf(f)
 }
 
+/// One array-index path segment above the remainder of a structured path.
+///
+/// Generated errors for nested fixed arrays wrap their leaf in one node per
+/// enclosing array, so a failing element reports `field[i][j]` with a fixed,
+/// allocation-free chain whose depth is a property of the declaration.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct IndexNode<T> {
+    pub index: usize,
+    pub source: T,
+}
+
+impl<T: SchemaError> fmt::Display for IndexNode<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        __fmt_schema_error(self, f)
+    }
+}
+
+impl<T: SchemaError> core::error::Error for IndexNode<T> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl<T: SchemaError> SchemaError for IndexNode<T> {
+    fn kind(&self) -> ErrorKind {
+        self.source.kind()
+    }
+    fn schema(&self) -> &'static str {
+        self.source.schema()
+    }
+    fn segment(&self) -> Option<ErrorPathSegment> {
+        Some(ErrorPathSegment::Index(self.index))
+    }
+    fn child(&self) -> Option<&dyn SchemaError> {
+        Some(&self.source)
+    }
+    fn __fmt_leaf(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.source.__fmt_leaf(f)
+    }
+}
+
+/// Terminal array-index segment of a rejected array mutation.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct IndexLeaf {
+    pub schema: &'static str,
+    pub index: usize,
+    pub kind: ErrorKind,
+}
+
+impl fmt::Display for IndexLeaf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        __fmt_schema_error(self, f)
+    }
+}
+
+impl core::error::Error for IndexLeaf {}
+
+impl SchemaError for IndexLeaf {
+    fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+    fn schema(&self) -> &'static str {
+        self.schema
+    }
+    fn segment(&self) -> Option<ErrorPathSegment> {
+        Some(ErrorPathSegment::Index(self.index))
+    }
+    fn child(&self) -> Option<&dyn SchemaError> {
+        None
+    }
+    fn __fmt_leaf(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("array mutation rejected")
+    }
+}
+
+/// A field name paired with the index path below it. The generated mutation
+/// error reports the field segment itself and exposes `path` as its child.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct FieldIndexPath<P> {
+    pub field: &'static str,
+    pub path: P,
+}
+
 /// Returns only the schema and structured path portion of an error.
 #[cfg(feature = "alloc")]
 pub fn error_path_string(error: &dyn SchemaError) -> alloc::string::String {
@@ -260,5 +346,29 @@ mod tests {
         let path = error_path_string(&ROOT);
         assert_eq!(path, "Message.config.File.path");
         assert_eq!(format!("{ROOT}"), format!("{path}: deep failure"));
+    }
+
+    #[test]
+    fn nested_index_nodes_report_every_enclosing_array_index_in_order() {
+        let error = IndexNode {
+            index: 2,
+            source: IndexNode {
+                index: 1,
+                source: IndexLeaf {
+                    schema: "Grid",
+                    index: 0,
+                    kind: ErrorKind::CapacityExceeded,
+                },
+            },
+        };
+        assert_eq!(error.kind(), ErrorKind::CapacityExceeded);
+        assert_eq!(error.schema(), "Grid");
+        assert_eq!(format!("{error}"), "Grid[2][1][0]: array mutation rejected");
+        let first = error.child().unwrap();
+        assert_eq!(first.segment(), Some(ErrorPathSegment::Index(1)));
+        let last = first.child().unwrap();
+        assert_eq!(last.segment(), Some(ErrorPathSegment::Index(0)));
+        assert!(last.child().is_none());
+        assert!(core::error::Error::source(&error).is_some());
     }
 }

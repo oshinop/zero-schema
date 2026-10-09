@@ -1,0 +1,11 @@
+error: borrowed string fields require #[zero(capacity = N)]
+ --> tests/ui/fail/73_string_array_missing_capacity.rs:7:13
+  |
+7 |     names: [&'a U16CStr; 4],
+  |             ^
+
+error: borrowed string fields require #[zero(capacity = N)]
+  --> tests/ui/fail/73_string_array_missing_capacity.rs:12:14
+   |
+12 |     names: [[&'a str; 2]; 2],
+   |              ^

@@ -15,6 +15,8 @@ fn frontend_contract() {
     cases.pass("tests/ui/pass/09_option_capability_surface.rs");
     cases.pass("tests/ui/pass/10_optional_source_lifetime.rs");
     cases.pass("tests/ui/pass/11_symbolic_nonzero_arrays.rs");
+    cases.pass("tests/ui/pass/12_string_and_nested_arrays.rs");
+    cases.pass("tests/ui/pass/13_zeroed_buffer_option_fix.rs");
 
     cases.compile_fail("tests/ui/fail/00_removed_derive.rs");
     cases.compile_fail("tests/ui/fail/01_removed_container_options.rs");
@@ -92,6 +94,14 @@ fn frontend_contract() {
     cases.compile_fail("tests/ui/fail/70_optional_zero_valid_scalar_array.rs");
     cases.compile_fail("tests/ui/fail/71_nested_symbolic_zero_array.rs");
     cases.compile_fail("tests/ui/fail/72_optional_zero_valid_tagged_variant.rs");
+    cases.compile_fail("tests/ui/fail/73_string_array_missing_capacity.rs");
+    cases.compile_fail("tests/ui/fail/74_array_option_scope.rs");
+    cases.compile_fail("tests/ui/fail/75_optional_nested_or_string_array.rs");
+    cases.compile_fail("tests/ui/fail/76_nested_zero_length_array.rs");
+    cases.compile_fail("tests/ui/fail/77_nested_symbolic_zero_arrays.rs");
+    cases.compile_fail("tests/ui/fail/78_collision_access_prefix.rs");
+    cases.compile_fail("tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs");
+    cases.compile_fail("tests/ui/fail/80_collision_zero_is_valid.rs");
 }
 
 #[test]

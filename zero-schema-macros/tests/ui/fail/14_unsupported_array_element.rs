@@ -2,7 +2,7 @@ use zero_schema_macros::zero;
 
 #[zero]
 struct UnsupportedArray<'a> {
-    values: [&'a str; 2],
+    values: [&'a [u8; 2]; 2],
 }
 
 fn main() {}

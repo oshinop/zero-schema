@@ -1,0 +1,11 @@
+error: generated zero-schema name collision for `access_prefix`
+ --> tests/ui/fail/78_collision_access_prefix.rs:5:5
+  |
+5 |     access_prefix: u8,
+  |     ^^^^^^^^^^^^^
+
+error: generated zero-schema name collision for `access_mut_prefix`
+  --> tests/ui/fail/78_collision_access_prefix.rs:10:5
+   |
+10 |     access_mut_prefix: u8,
+   |     ^^^^^^^^^^^^^^^^^

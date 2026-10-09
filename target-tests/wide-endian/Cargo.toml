@@ -36,5 +36,5 @@ positive-fixtures = [
 
 [dependencies]
 zero-schema = { path = "../..", default-features = false }
-widestring = { version = "=1.2.1", default-features = false }
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+widestring = { version = "1.2.1", default-features = false }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }

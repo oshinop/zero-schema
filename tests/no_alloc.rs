@@ -32,6 +32,14 @@ fn core_capability_operations_remain_allocation_free_on_reviewed_producer_bytes(
         assert_eq!(view.samples().copy_into(), [3, 5, 8]);
         let _ = view.copy_into();
     });
+    zero_allocations(|| {
+        let (view, rest) = AllFeatures::access_prefix(bytes.as_bytes()).unwrap();
+        assert_eq!((view.samples().get(2), rest.len()), (Some(8), 0));
+    });
+    zero_allocations(|| {
+        let (mut view, rest) = AllFeatures::access_mut_prefix(bytes.as_bytes_mut()).unwrap();
+        assert_eq!((view.name_mut().capacity(), rest.len()), (7, 0));
+    });
 }
 
 #[test]

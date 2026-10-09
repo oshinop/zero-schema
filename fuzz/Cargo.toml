@@ -14,7 +14,7 @@ resolver = "3"
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 zero-schema = { path = "..", default-features = false, features = ["std"] }
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
 zero-schema-schema-corpus = { path = "../test-fixtures/schema-corpus", default-features = false }
 
 [dev-dependencies]

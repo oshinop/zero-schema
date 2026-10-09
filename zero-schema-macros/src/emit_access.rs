@@ -102,6 +102,32 @@ pub(crate) fn emit_root_surface(
                 let _ = Self::SCHEMA_SIZE;
                 <#module::#support #plain_arguments>::__zero_schema_access_mut(bytes)
             }
+
+            /// Proves exactly the leading `SCHEMA_SIZE` bytes of `bytes` with the same
+            /// eager proof as `access`, and returns the read capability together with
+            /// the bytes after that prefix.
+            ///
+            /// Fewer than `SCHEMA_SIZE` bytes fail with a layout error before alignment
+            /// is tested; `bytes` must then start at an address meeting `SCHEMA_ALIGN`.
+            /// The remainder is neither inspected nor aligned, and the capability
+            /// borrows only the proved prefix.
+            pub fn access_prefix<'wire>(bytes: &'wire [::core::primitive::u8]) -> ::core::result::Result<(#reference #cap_args, &'wire [::core::primitive::u8]), #access_error #plain_arguments> {
+                let _ = Self::SCHEMA_SIZE;
+                <#module::#support #plain_arguments>::__zero_schema_access_prefix(bytes)
+            }
+
+            /// Proves exactly the leading `SCHEMA_SIZE` bytes of `bytes` with the same
+            /// eager proof as `access_mut`, and returns the exclusive capability
+            /// together with the disjoint exclusive bytes after that prefix.
+            ///
+            /// Fewer than `SCHEMA_SIZE` bytes fail with a layout error before alignment
+            /// is tested; `bytes` must then start at an address meeting `SCHEMA_ALIGN`.
+            /// The remainder is neither inspected nor aligned, and the capability
+            /// can mutate only the proved prefix.
+            pub fn access_mut_prefix<'wire>(bytes: &'wire mut [::core::primitive::u8]) -> ::core::result::Result<(#mutable #cap_args, &'wire mut [::core::primitive::u8]), #access_error #plain_arguments> {
+                let _ = Self::SCHEMA_SIZE;
+                <#module::#support #plain_arguments>::__zero_schema_access_mut_prefix(bytes)
+            }
         ),
         ItemKind::ScalarEnum { .. } => quote!(
             pub fn access<'wire>(bytes: &'wire [::core::primitive::u8]) -> ::core::result::Result<#reference<'wire>, #access_error> {
@@ -111,16 +137,58 @@ pub(crate) fn emit_root_surface(
             pub fn access_mut<'wire>(bytes: &'wire mut [::core::primitive::u8]) -> ::core::result::Result<#mutable<'wire>, #access_error> {
                 #module::#support::__zero_schema_access_mut(bytes)
             }
+
+            /// Proves exactly the leading `SCHEMA_SIZE` bytes of `bytes` with the same
+            /// eager proof as `access`, and returns the read capability together with
+            /// the bytes after that prefix.
+            ///
+            /// Fewer than `SCHEMA_SIZE` bytes fail with a layout error before alignment
+            /// is tested; `bytes` must then start at an address meeting `SCHEMA_ALIGN`.
+            /// The remainder is neither inspected nor aligned.
+            pub fn access_prefix<'wire>(bytes: &'wire [::core::primitive::u8]) -> ::core::result::Result<(#reference<'wire>, &'wire [::core::primitive::u8]), #access_error> {
+                #module::#support::__zero_schema_access_prefix(bytes)
+            }
+
+            /// Proves exactly the leading `SCHEMA_SIZE` bytes of `bytes` with the same
+            /// eager proof as `access_mut`, and returns the exclusive capability
+            /// together with the disjoint exclusive bytes after that prefix.
+            ///
+            /// Fewer than `SCHEMA_SIZE` bytes fail with a layout error before alignment
+            /// is tested; `bytes` must then start at an address meeting `SCHEMA_ALIGN`.
+            /// The remainder is neither inspected nor aligned.
+            pub fn access_mut_prefix<'wire>(bytes: &'wire mut [::core::primitive::u8]) -> ::core::result::Result<(#mutable<'wire>, &'wire mut [::core::primitive::u8]), #access_error> {
+                #module::#support::__zero_schema_access_mut_prefix(bytes)
+            }
         ),
         ItemKind::TaggedEnum => unreachable!(),
     };
 
     let zero_state = wire_type_zero_state(ir, runtime)?;
+    let zero_is_valid = wire_type_zero_is_valid(ir, runtime)?;
+    let zero_valid_const = quote!(
+        /// Whether an all-zero span of exactly `SCHEMA_SIZE` bytes is a type-valid
+        /// instance of this schema, that is, whether `access` and `access_mut`
+        /// accept it.
+        ///
+        /// This is an exact compile-time property of the declaration and never
+        /// inspects bytes. Primitives, Booleans, fixed bytes, every bounded string
+        /// form and `Option<T>` fields are always zero-valid; a scalar enum needs a
+        /// declared discriminant `0`; a nested schema and a fixed array contribute
+        /// their schema's or element's value; an externally tagged payload needs a
+        /// variant whose tag has discriminant `0` and whose payload is zero-valid.
+        ///
+        /// For a generic schema the value depends on its type arguments, so name it
+        /// with every parameter supplied, for example
+        /// `const { assert!(Root::<Child>::ZERO_IS_VALID) }`.
+        pub const ZERO_IS_VALID: ::core::primitive::bool =
+            <Self as #runtime::__private::WireTypeSupport>::ZERO_IS_VALID;
+    );
     let wire_type_support = match ir.kind {
         ItemKind::Struct | ItemKind::ScalarEnum { .. } => quote!(
             impl #impl_generics #runtime::__private::WireTypeSupport for #ident #original_arguments #where_clause {
                 type Support = #module::#support #plain_arguments;
                 type ZeroState = #zero_state;
+                const ZERO_IS_VALID: ::core::primitive::bool = #zero_is_valid;
             }
             #logical_schema
         ),
@@ -140,6 +208,7 @@ pub(crate) fn emit_root_surface(
         #wire_type_support
         #patch_type_support
         impl #impl_generics #ident #original_arguments #where_clause {
+            #zero_valid_const
             #methods
         }
     ))
@@ -311,6 +380,30 @@ fn emit_record_module(
                 .map_err(<#owner #plain_arguments as #runtime::__private::OwnerAdapter>::access_layout)?;
                 let proof = <Self as #runtime::__private::SchemaSupport>::prove_mut(input)?;
                 Ok(<Self as #runtime::__private::SchemaSupport>::make_mut(proof))
+            }
+
+            pub(super) fn __zero_schema_access_prefix<'wire>(
+                bytes: &'wire [::core::primitive::u8],
+            ) -> ::core::result::Result<(#reference #cap_args, &'wire [::core::primitive::u8]), #access_error #plain_arguments> {
+                let (input, remainder) = #runtime::__private::SharedInput::<#root_wire>::from_prefix(
+                    bytes,
+                    #input_access_token { _private: () },
+                )
+                .map_err(<#owner #plain_arguments as #runtime::__private::OwnerAdapter>::access_layout)?;
+                let proof = <Self as #runtime::__private::SchemaSupport>::prove(input)?;
+                Ok((<Self as #runtime::__private::SchemaSupport>::make_ref(proof), remainder))
+            }
+
+            pub(super) fn __zero_schema_access_mut_prefix<'wire>(
+                bytes: &'wire mut [::core::primitive::u8],
+            ) -> ::core::result::Result<(#mutable #cap_args, &'wire mut [::core::primitive::u8]), #access_error #plain_arguments> {
+                let (input, remainder) = #runtime::__private::ExclusiveInput::<#root_wire>::from_prefix(
+                    bytes,
+                    #input_access_token { _private: () },
+                )
+                .map_err(<#owner #plain_arguments as #runtime::__private::OwnerAdapter>::access_layout)?;
+                let proof = <Self as #runtime::__private::SchemaSupport>::prove_mut(input)?;
+                Ok((<Self as #runtime::__private::SchemaSupport>::make_mut(proof), remainder))
             }
         }
 
@@ -557,6 +650,30 @@ fn emit_scalar_module(
                 .map_err(<#owner as #runtime::__private::OwnerAdapter>::access_layout)?;
                 let proof = <Self as #runtime::__private::SchemaSupport>::prove_mut(input)?;
                 Ok(<Self as #runtime::__private::SchemaSupport>::make_mut(proof))
+            }
+
+            pub(super) fn __zero_schema_access_prefix<'wire>(
+                bytes: &'wire [::core::primitive::u8],
+            ) -> ::core::result::Result<(#reference<'wire>, &'wire [::core::primitive::u8]), #access_error> {
+                let (input, remainder) = #runtime::__private::SharedInput::<#root_wire>::from_prefix(
+                    bytes,
+                    #input_access_token { _private: () },
+                )
+                .map_err(<#owner as #runtime::__private::OwnerAdapter>::access_layout)?;
+                let proof = <Self as #runtime::__private::SchemaSupport>::prove(input)?;
+                Ok((Self::make_view(proof), remainder))
+            }
+
+            pub(super) fn __zero_schema_access_mut_prefix<'wire>(
+                bytes: &'wire mut [::core::primitive::u8],
+            ) -> ::core::result::Result<(#mutable<'wire>, &'wire mut [::core::primitive::u8]), #access_error> {
+                let (input, remainder) = #runtime::__private::ExclusiveInput::<#root_wire>::from_prefix(
+                    bytes,
+                    #input_access_token { _private: () },
+                )
+                .map_err(<#owner as #runtime::__private::OwnerAdapter>::access_layout)?;
+                let proof = <Self as #runtime::__private::SchemaSupport>::prove_mut(input)?;
+                Ok((<Self as #runtime::__private::SchemaSupport>::make_mut(proof), remainder))
             }
             pub(super) fn make_view<'wire>(proof: #runtime::__private::ProvedShared<'wire, Self, #root_wire>) -> #reference<'wire> {
                 #reference { input: proof.into_input(#input_access_token { _private: () }) }
@@ -953,10 +1070,16 @@ fn field_read_type(
                     "internal array type mismatch",
                 ));
             };
-            let elem = array_logical_type(element, &array.elem, runtime, lifetime.clone());
             let n = emit_wire::array_length(&field.support_ty)?;
             let adapter = array_adapter_name(field);
             let args = emit_wire::wire_arguments(&ir.generics.original);
+            let elem = array_logical_type(
+                element,
+                &array.elem,
+                runtime,
+                lifetime.clone(),
+                &quote!(#adapter #args),
+            );
             Ok(quote!(#runtime::ArrayRef<#lifetime,#elem,#n,#adapter #args>))
         }
         FieldCategory::Optional { .. } => {
@@ -1122,10 +1245,16 @@ fn field_read_expr(
                 support_runtime,
                 field.wire_endian,
             )?;
-            let logical = array_logical_type(element, &array.elem, runtime, lifetime.clone());
-            let n = emit_wire::array_length(&field.support_ty)?;
             let adapter = array_adapter_name(field);
             let args = emit_wire::wire_arguments(&ir.generics.original);
+            let logical = array_logical_type(
+                element,
+                &array.elem,
+                runtime,
+                lifetime.clone(),
+                &quote!(#adapter #args),
+            );
+            let n = emit_wire::array_length(&field.support_ty)?;
             Ok(quote!({
                 let selected=match #input.subrange::<[#ew;#n]>(#offset){Ok(value)=>value,Err(_)=>unreachable!("array offset is compiler asserted")};
                 match #runtime::ArrayRef::<#logical,#n,#adapter #args>::prove(selected){Ok(view)=>view,Err(_)=>unreachable!("a parent capability retains proved array elements")}
@@ -1205,8 +1334,10 @@ fn materialized_fields(
                 }))
             }
             FieldCategory::Path { tagged: true, .. } => Err(syn::Error::new_spanned(&field.ty, "tagged field is missing sibling")),
-            FieldCategory::Array { element, .. } if matches!(element.as_ref(), FieldCategory::Path { .. }) => Ok(quote!(#name: ::core::array::from_fn(|index| match self.#name().get(index) { Some(value) => #runtime::__private::Materialize::materialize(&value), None => unreachable!("proved array has every element") }))),
-            FieldCategory::Array { .. } => Ok(quote!(#name: self.#name().copy_into())),
+            FieldCategory::Array { .. } => {
+                let array = materialize_array(runtime, &field.category, quote!(array), 0);
+                Ok(quote!(#name: { let array = self.#name(); #array }))
+            }
             FieldCategory::Optional { inner, .. } => match inner.as_ref() {
                 FieldCategory::Path { .. } => Ok(quote!(#name: self.#name().map(|value| #runtime::__private::Materialize::materialize(&value)))),
                 FieldCategory::Array { element, .. }
@@ -1388,7 +1519,13 @@ fn proof_field(
             let length = emit_wire::array_length(&field.support_ty)?;
             let adapter = array_adapter_name(field);
             let adapter_args = emit_wire::wire_arguments(&ir.generics.original);
-            let logical = array_logical_type(element, &array.elem, runtime, quote!('wire));
+            let logical = array_logical_type(
+                element,
+                &array.elem,
+                runtime,
+                quote!('wire),
+                &quote!(#adapter #adapter_args),
+            );
             Ok(quote!({
                 let selected = input.subrange::<[#element_wire; #length]>(#offset).map_err(|error| #error::Layout(error))?;
                 #runtime::ArrayRef::<#logical, #length, #adapter #adapter_args>::prove(selected)?;
@@ -1473,11 +1610,13 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
                     quote!(Self::#variant(source) => #runtime::SchemaError::__fmt_leaf(source, f),),
                 );
             }
-            FieldCategory::Array { element, .. }
-                if matches!(element.as_ref(), FieldCategory::Bool) =>
+            FieldCategory::Array { .. }
+                if matches!(field.category.array_leaf(), Some((FieldCategory::Bool, _))) =>
             {
+                let (_, depth) = field.category.array_leaf().expect("array category");
                 let variant = error_array_bool_variant(field);
                 let inner = error_array_bool_error_type(field);
+                let payload = index_path_type(runtime, quote!(#inner), depth);
                 inner_items.push(quote!(
                     #[derive(Debug)]
                     pub struct #inner { index: usize, raw: ::core::primitive::u8 }
@@ -1497,7 +1636,7 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
                         }
                     }
                 ));
-                variants.push(quote!(#variant(#inner)));
+                variants.push(quote!(#variant(#payload)));
                 kind_arms
                     .push(quote!(Self::#variant(source) => #runtime::SchemaError::kind(source),));
                 segment_arms.push(quote!(Self::#variant(_) => Some(#runtime::ErrorPathSegment::Field(#field_name)),));
@@ -1507,18 +1646,16 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
                     quote!(Self::#variant(source) => #runtime::SchemaError::__fmt_leaf(source, f),),
                 );
             }
-            FieldCategory::Array { element, .. }
-                if matches!(element.as_ref(), FieldCategory::Path { .. }) =>
+            FieldCategory::Array { .. }
+                if matches!(
+                    field.category.array_leaf(),
+                    Some((FieldCategory::Path { .. }, _))
+                ) =>
             {
+                let (_, depth) = field.category.array_leaf().expect("array category");
                 let variant = error_array_child_variant(field);
                 let inner = error_array_child_error_type(field);
-                let Type::Array(array) = &field.ty else {
-                    return Err(syn::Error::new_spanned(
-                        &field.ty,
-                        "internal array type mismatch",
-                    ));
-                };
-                let element_ty = analyze::support_type(&array.elem);
+                let element_ty = analyze::support_type(array_leaf_type(&field.ty));
                 let source = schema_access_error_type(&element_ty, runtime);
                 inner_items.push(quote!(
                     pub struct #inner #plain_generics #support_where { index: usize, source: #source }
@@ -1539,7 +1676,43 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
                         fn __fmt_leaf(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { #runtime::SchemaError::__fmt_leaf(&self.source, f) }
                     }
                 ));
-                variants.push(quote!(#variant(#inner #plain_args)));
+                let payload = index_path_type(runtime, quote!(#inner #plain_args), depth);
+                variants.push(quote!(#variant(#payload)));
+                kind_arms
+                    .push(quote!(Self::#variant(source) => #runtime::SchemaError::kind(source),));
+                segment_arms.push(quote!(Self::#variant(_) => Some(#runtime::ErrorPathSegment::Field(#field_name)),));
+                child_arms.push(quote!(Self::#variant(source) => Some(source),));
+                source_arms.push(quote!(Self::#variant(source) => Some(source),));
+                leaf_arms.push(
+                    quote!(Self::#variant(source) => #runtime::SchemaError::__fmt_leaf(source, f),),
+                );
+            }
+            FieldCategory::Array { .. } if matches!(field.category.array_leaf(), Some((leaf, _)) if leaf.is_string()) =>
+            {
+                let (_, depth) = field.category.array_leaf().expect("array category");
+                let variant = error_array_string_variant(field);
+                let inner = error_array_string_error_type(field);
+                let payload = index_path_type(runtime, quote!(#inner), depth);
+                inner_items.push(quote!(
+                    #[derive(Debug)]
+                    pub struct #inner { index: usize, kind: #runtime::ErrorKind }
+                    impl ::core::fmt::Display for #inner {
+                        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                            #runtime::__private::__fmt_schema_error(self, f)
+                        }
+                    }
+                    impl ::core::error::Error for #inner {}
+                    impl #runtime::SchemaError for #inner {
+                        fn kind(&self) -> #runtime::ErrorKind { self.kind }
+                        fn schema(&self) -> &'static str { #logical_name }
+                        fn segment(&self) -> Option<#runtime::ErrorPathSegment> { Some(#runtime::ErrorPathSegment::Index(self.index)) }
+                        fn child(&self) -> Option<&dyn #runtime::SchemaError> { None }
+                        fn __fmt_leaf(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                            f.write_str("string representation is invalid")
+                        }
+                    }
+                ));
+                variants.push(quote!(#variant(#payload)));
                 kind_arms
                     .push(quote!(Self::#variant(source) => #runtime::SchemaError::kind(source),));
                 segment_arms.push(quote!(Self::#variant(_) => Some(#runtime::ErrorPathSegment::Field(#field_name)),));
@@ -1606,7 +1779,61 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
         }
     }
 
+    // A nested array element that can fail mutation (a schema or string leaf)
+    // reports every enclosing index. Each distinct nesting depth gets one
+    // variant whose payload is a fixed-depth, allocation-free index chain.
+    let mut path_depths = std::collections::BTreeSet::new();
+    for field in &ir.fields {
+        if let Some((leaf, depth)) = field.category.array_leaf() {
+            if depth >= 2 && (matches!(leaf, FieldCategory::Path { .. }) || leaf.is_string()) {
+                path_depths.insert(depth);
+            }
+        }
+    }
+    let path_variants = path_depths
+        .iter()
+        .map(|depth| format_ident!("ArrayPath{}", depth))
+        .collect::<Vec<_>>();
+    let path_variant_decls = path_depths.iter().map(|depth| {
+        let variant = format_ident!("ArrayPath{}", depth);
+        let path = index_path_type(runtime, quote!(#runtime::__private::IndexLeaf), *depth);
+        quote!(#variant(#runtime::__private::FieldIndexPath<#path>))
+    });
+    let path_constructors = path_depths.iter().map(|depth| {
+        let variant = format_ident!("ArrayPath{}", depth);
+        let constructor = format_ident!("array_path{}", depth);
+        let last = depth - 1;
+        let mut path = quote!(#runtime::__private::IndexLeaf { schema: #logical_name, index: indices[#last], kind });
+        for level in (0..last).rev() {
+            path = quote!(#runtime::__private::IndexNode { index: indices[#level], source: #path });
+        }
+        quote!(
+            fn #constructor(field: &'static str, indices: [usize; #depth], kind: #runtime::ErrorKind) -> Self {
+                Self::#variant(#runtime::__private::FieldIndexPath { field, path: #path })
+            }
+        )
+    });
+    // The element-position string error mapping does not mention the root's
+    // generics, so it is a module function rather than an inference-dependent
+    // associated function of the generic error enum.
+    let has_string_array = ir
+        .fields
+        .iter()
+        .any(|field| matches!(field.category.array_leaf(), Some((leaf, _)) if leaf.is_string()));
+    let string_kind = has_string_array.then(|| {
+        quote!(
+            fn __zero_schema_string_kind(error: #runtime::__private::StringMutationError) -> #runtime::ErrorKind {
+                match error {
+                    #runtime::__private::StringMutationError::CapacityExceeded { .. } => #runtime::ErrorKind::CapacityExceeded,
+                    #runtime::__private::StringMutationError::LengthUnrepresentable { .. } => #runtime::ErrorKind::LengthUnrepresentable,
+                    #runtime::__private::StringMutationError::PrefixSize { .. } | #runtime::__private::StringMutationError::WideByteSize { .. } | #runtime::__private::StringMutationError::Layout(_) => #runtime::ErrorKind::Layout,
+                }
+            }
+        )
+    });
+
     Ok(quote!(
+        #string_kind
         #(#inner_items)*
         pub enum #error #plain_generics #support_where { Layout(#runtime::LayoutError), #(#variants,)* }
         impl #plain_generics ::core::fmt::Debug for #error #plain_args #support_where {
@@ -1646,6 +1873,7 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
             Layout(#runtime::LayoutError),
             Field { field: &'static str, kind: #runtime::ErrorKind },
             Array(__MutationArrayError),
+            #(#path_variant_decls,)*
         }
         impl #plain_generics #mutation #plain_args #support_where {
             fn field(field: &'static str, error: #runtime::__private::StringMutationError) -> Self {
@@ -1658,6 +1886,7 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
             }
             fn field_kind(field: &'static str, kind: #runtime::ErrorKind) -> Self { Self::Field { field, kind } }
             fn array(field: &'static str, index: usize, kind: #runtime::ErrorKind) -> Self { Self::Array(__MutationArrayError { field, index, kind }) }
+            #(#path_constructors)*
         }
         impl #plain_generics From<#error #plain_args> for #mutation #plain_args #support_where {
             fn from(error: #error #plain_args) -> Self { Self::Access(error) }
@@ -1667,15 +1896,15 @@ fn emit_record_errors(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream>
         }
         impl #plain_generics ::core::error::Error for #mutation #plain_args #support_where {
             fn source(&self) -> Option<&(dyn ::core::error::Error + 'static)> {
-                match self { Self::Access(source) => Some(source), Self::Layout(source) => Some(source), Self::Field { .. } | Self::Array(_) => None }
+                match self { Self::Access(source) => Some(source), Self::Layout(source) => Some(source), Self::Field { .. } | Self::Array(_) #(| Self::#path_variants(_))* => None }
             }
         }
         impl #plain_generics #runtime::SchemaError for #mutation #plain_args #support_where {
-            fn kind(&self) -> #runtime::ErrorKind { match self { Self::Access(source) => source.kind(), Self::Layout(_) => #runtime::ErrorKind::Layout, Self::Field { kind, .. } => *kind, Self::Array(source) => source.kind() } }
+            fn kind(&self) -> #runtime::ErrorKind { match self { Self::Access(source) => source.kind(), Self::Layout(_) => #runtime::ErrorKind::Layout, Self::Field { kind, .. } => *kind, Self::Array(source) => source.kind() #(, Self::#path_variants(source) => #runtime::SchemaError::kind(&source.path))* } }
             fn schema(&self) -> &'static str { #logical_name }
-            fn segment(&self) -> Option<#runtime::ErrorPathSegment> { match self { Self::Field { field, .. } => Some(#runtime::ErrorPathSegment::Field(field)), Self::Array(source) => Some(#runtime::ErrorPathSegment::Field(source.field)), _ => None } }
-            fn child(&self) -> Option<&dyn #runtime::SchemaError> { match self { Self::Access(source) => Some(source), Self::Array(source) => Some(source), Self::Layout(_) | Self::Field { .. } => None } }
-            fn __fmt_leaf(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { match self { Self::Access(source) => #runtime::SchemaError::__fmt_leaf(source, f), Self::Layout(source) => ::core::fmt::Display::fmt(source, f), Self::Field { .. } => f.write_str("field mutation rejected"), Self::Array(source) => #runtime::SchemaError::__fmt_leaf(source, f) } }
+            fn segment(&self) -> Option<#runtime::ErrorPathSegment> { match self { Self::Field { field, .. } => Some(#runtime::ErrorPathSegment::Field(field)), Self::Array(source) => Some(#runtime::ErrorPathSegment::Field(source.field)) #(, Self::#path_variants(source) => Some(#runtime::ErrorPathSegment::Field(source.field)))*, _ => None } }
+            fn child(&self) -> Option<&dyn #runtime::SchemaError> { match self { Self::Access(source) => Some(source), Self::Array(source) => Some(source) #(, Self::#path_variants(source) => Some(&source.path))*, Self::Layout(_) | Self::Field { .. } => None } }
+            fn __fmt_leaf(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { match self { Self::Access(source) => #runtime::SchemaError::__fmt_leaf(source, f), Self::Layout(source) => ::core::fmt::Display::fmt(source, f), Self::Field { .. } => f.write_str("field mutation rejected"), Self::Array(source) => #runtime::SchemaError::__fmt_leaf(source, f) #(, Self::#path_variants(source) => #runtime::SchemaError::__fmt_leaf(&source.path, f))* } }
         }
     ))
 }
@@ -1939,6 +2168,97 @@ fn field_zero_state(
         }
     }
 }
+
+/// Joins boolean constant terms with `op`; an empty list is `empty`.
+fn bool_chain(terms: Vec<TokenStream>, op: TokenStream, empty: bool) -> TokenStream {
+    let mut terms = terms.into_iter();
+    let Some(first) = terms.next() else {
+        return quote!(#empty);
+    };
+    let rest = terms.collect::<Vec<_>>();
+    quote!(#first #(#op #rest)*)
+}
+
+/// Exact all-zero validity of a record or scalar enum as a `bool` constant
+/// expression: a scalar enum needs a declared zero discriminant and a record needs
+/// every field to be zero-valid.
+fn wire_type_zero_is_valid(ir: &SchemaIr, runtime: &Path) -> syn::Result<TokenStream> {
+    match ir.kind {
+        ItemKind::ScalarEnum { .. } => {
+            let declares_zero = ir
+                .variants
+                .iter()
+                .any(|variant| variant.raw_discriminant == Some(0));
+            Ok(quote!(#declares_zero))
+        }
+        ItemKind::Struct => {
+            let mut terms = Vec::new();
+            for field in &ir.fields {
+                let source_ty = analyze::erased_source_type(&field.ty);
+                terms.extend(field_zero_is_valid(&field.category, &source_ty, runtime)?);
+            }
+            Ok(bool_chain(terms, quote!(&&), true))
+        }
+        ItemKind::TaggedEnum => unreachable!("tagged payloads do not implement WireTypeSupport"),
+    }
+}
+
+/// Exact all-zero validity of a tagged payload: the variant whose tag has
+/// discriminant zero must exist and carry a zero-valid payload. The external tag
+/// value is the only thing that selects a variant, so no other variant counts.
+pub(crate) fn tagged_payload_zero_is_valid(ir: &SchemaIr, runtime: &Path) -> TokenStream {
+    let terms = ir
+        .variants
+        .iter()
+        .map(|variant| {
+            let tag = &variant.tag;
+            let payload = match &variant.shape {
+                VariantShape::Unit => quote!(true),
+                VariantShape::Newtype(ty) => {
+                    let source_ty = analyze::erased_source_type(ty);
+                    quote!(<#source_ty as #runtime::__private::WireTypeSupport>::ZERO_IS_VALID)
+                }
+            };
+            quote!((#tag as ::core::primitive::u64 == 0 && #payload))
+        })
+        .collect();
+    bool_chain(terms, quote!(||), false)
+}
+
+/// The `bool` constant term a field contributes to its record's zero validity, or
+/// `None` when the field is always zero-valid (primitives, Booleans, fixed bytes,
+/// every bounded string form, and `Option`, whose all-zero span is `None`).
+fn field_zero_is_valid(
+    category: &FieldCategory,
+    support_ty: &Type,
+    runtime: &Path,
+) -> syn::Result<Option<TokenStream>> {
+    match category {
+        FieldCategory::Primitive(_)
+        | FieldCategory::Bool
+        | FieldCategory::BorrowedStr { .. }
+        | FieldCategory::BorrowedCStr { .. }
+        | FieldCategory::BorrowedU16Str { .. }
+        | FieldCategory::BorrowedU16CStr { .. }
+        | FieldCategory::FixedBytes { .. }
+        | FieldCategory::Optional { .. } => Ok(None),
+        FieldCategory::Path { tagged: true, .. } => Ok(Some(
+            quote!(<#support_ty as #runtime::__private::TaggedPayloadTypeSupport>::ZERO_IS_VALID),
+        )),
+        FieldCategory::Path { tagged: false, .. } => Ok(Some(
+            quote!(<#support_ty as #runtime::__private::WireTypeSupport>::ZERO_IS_VALID),
+        )),
+        FieldCategory::Array { element, .. } => {
+            let Type::Array(array) = support_ty else {
+                return Err(syn::Error::new_spanned(
+                    support_ty,
+                    "internal array support type mismatch",
+                ));
+            };
+            field_zero_is_valid(element, &array.elem, runtime)
+        }
+    }
+}
 pub(crate) fn field_value_offset(
     ir: &SchemaIr,
     field: &FieldIr,
@@ -1999,6 +2319,12 @@ pub(crate) fn error_array_child_error_type(field: &FieldIr) -> Ident {
 }
 pub(crate) fn error_array_child_variant(field: &FieldIr) -> Ident {
     format_ident!("{}ArrayChild", pascal(&field.logical_name))
+}
+pub(crate) fn error_array_string_variant(field: &FieldIr) -> Ident {
+    format_ident!("{}ArrayString", pascal(&field.logical_name))
+}
+pub(crate) fn error_array_string_error_type(field: &FieldIr) -> Ident {
+    format_ident!("{}ArrayStringError", pascal(&field.logical_name))
 }
 fn pascal(value: &str) -> String {
     let mut out = String::new();
@@ -2208,11 +2534,16 @@ fn tagged_ref_type(ty: &Type, runtime: &Path, lifetime: TokenStream) -> TokenStr
     let support = tagged_support_type(ty, runtime);
     quote!(<#support as #runtime::__private::TaggedPayloadSupport>::Ref<#lifetime>)
 }
-fn array_logical_type(
+/// The zero-copy read type of one array element. A string element is the
+/// borrowed string; a nested element is the inner array view, named through the
+/// field adapter's `Read` projection so a deeper level never spells its own
+/// adapter.
+pub(crate) fn array_logical_type(
     category: &FieldCategory,
     ty: &Type,
     runtime: &Path,
     lifetime: TokenStream,
+    adapter: &TokenStream,
 ) -> TokenStream {
     match category {
         FieldCategory::Primitive(_) => quote!(#ty),
@@ -2221,7 +2552,152 @@ fn array_logical_type(
             let support = analyze::support_type(ty);
             schema_ref_type(&support, runtime, lifetime)
         }
+        string if string.is_string() => string_logical_type(string, runtime, &lifetime),
+        FieldCategory::Array { .. } => {
+            quote!(<#adapter as #runtime::__private::ArrayElementAdapter>::Read<#lifetime>)
+        }
         _ => quote!(#ty),
+    }
+}
+
+/// The borrowed logical type of one bounded string category at `lifetime`.
+pub(crate) fn string_logical_type(
+    category: &FieldCategory,
+    runtime: &Path,
+    lifetime: &TokenStream,
+) -> TokenStream {
+    match category {
+        FieldCategory::BorrowedStr { .. } => quote!(&#lifetime ::core::primitive::str),
+        FieldCategory::BorrowedCStr { .. } => quote!(&#lifetime ::core::ffi::CStr),
+        FieldCategory::BorrowedU16Str { .. } => {
+            quote!(&#lifetime #runtime::__private::U16Str)
+        }
+        FieldCategory::BorrowedU16CStr { .. } => {
+            quote!(&#lifetime #runtime::__private::U16CStr)
+        }
+        _ => unreachable!("only bounded string categories have a borrowed logical type"),
+    }
+}
+
+/// Innermost non-array element type of a possibly nested fixed-array type.
+pub(crate) fn array_leaf_type(ty: &Type) -> &Type {
+    let mut current = ty;
+    while let Type::Array(array) = current {
+        current = &array.elem;
+    }
+    current
+}
+
+/// Length expressions of a possibly nested fixed-array type, outermost first.
+pub(crate) fn array_dims(ty: &Type) -> Vec<TokenStream> {
+    let mut dims = Vec::new();
+    let mut current = ty;
+    while let Type::Array(array) = current {
+        let length = &array.len;
+        dims.push(quote!(#length));
+        current = &array.elem;
+    }
+    dims
+}
+
+/// Wraps `leaf` in one hidden index node per enclosing array, so a failing
+/// element of a depth-`depth` array reports every index of its path.
+pub(crate) fn index_path_type(runtime: &Path, leaf: TokenStream, depth: usize) -> TokenStream {
+    (1..depth).fold(
+        leaf,
+        |inner, _| quote!(#runtime::__private::IndexNode<#inner>),
+    )
+}
+
+/// Builds a depth-`depth` index-path error from a flat position. `leaf` receives
+/// the innermost index expression and returns the leaf error; the dimensions are
+/// the lengths of every array level from the outermost to the innermost.
+pub(crate) fn index_path_error(
+    runtime: &Path,
+    dims: &[TokenStream],
+    flat: &TokenStream,
+    leaf: impl FnOnce(TokenStream) -> TokenStream,
+) -> TokenStream {
+    if dims.len() == 1 {
+        return leaf(flat.clone());
+    }
+    let indices = (0..dims.len())
+        .map(|level| format_ident!("__zero_schema_index_{}", level))
+        .collect::<Vec<_>>();
+    let mut steps = Vec::new();
+    for (level, dimension) in dims.iter().enumerate().skip(1).rev() {
+        let index = &indices[level];
+        steps.push(quote!(
+            let #index = __zero_schema_rest % (#dimension);
+            let __zero_schema_rest = __zero_schema_rest / (#dimension);
+        ));
+    }
+    let outermost = &indices[0];
+    let innermost = &indices[dims.len() - 1];
+    let mut error = leaf(quote!(#innermost));
+    for level in (0..dims.len() - 1).rev() {
+        let index = &indices[level];
+        error = quote!(#runtime::__private::IndexNode { index: #index, source: #error });
+    }
+    quote!({
+        let __zero_schema_rest: ::core::primitive::usize = #flat;
+        #(#steps)*
+        let #outermost = __zero_schema_rest;
+        #error
+    })
+}
+
+/// Index array form of [`index_path_error`], for mutation errors whose
+/// constructor takes `[outermost, .., innermost]`.
+pub(crate) fn index_path_array(dims: &[TokenStream], flat: &TokenStream) -> TokenStream {
+    let indices = (0..dims.len())
+        .map(|level| format_ident!("__zero_schema_index_{}", level))
+        .collect::<Vec<_>>();
+    let mut steps = Vec::new();
+    for (level, dimension) in dims.iter().enumerate().skip(1).rev() {
+        let index = &indices[level];
+        steps.push(quote!(
+            let #index = __zero_schema_rest % (#dimension);
+            let __zero_schema_rest = __zero_schema_rest / (#dimension);
+        ));
+    }
+    let outermost = &indices[0];
+    quote!({
+        let __zero_schema_rest: ::core::primitive::usize = #flat;
+        #(#steps)*
+        let #outermost = __zero_schema_rest;
+        [#(#indices),*]
+    })
+}
+
+/// Expression materializing a (possibly nested) array view into its logical
+/// `[T; N]` value. A schema element is materialized through its checked
+/// reference; a nested element recurses over the inner view.
+fn materialize_array(
+    runtime: &Path,
+    category: &FieldCategory,
+    array: TokenStream,
+    depth: usize,
+) -> TokenStream {
+    let FieldCategory::Array { element, .. } = category else {
+        unreachable!("array materialization requires an array category")
+    };
+    match element.as_ref() {
+        FieldCategory::Path { .. } => {
+            quote!(::core::array::from_fn(|index| match #array.get(index) {
+                Some(value) => #runtime::__private::Materialize::materialize(&value),
+                None => unreachable!("proved array has every element"),
+            }))
+        }
+        FieldCategory::Array { .. } => {
+            let row = format_ident!("row_{}", depth);
+            let inner = materialize_array(runtime, element, quote!(#row), depth + 1);
+            quote!(::core::array::from_fn(|index| match #array.get(index) {
+                Some(#row) => #inner,
+                None => unreachable!("proved array has every element"),
+            }))
+        }
+        _ => quote!(#array.copy_into()),
     }
 }
 pub(crate) fn rebind_type(ir: &SchemaIr, ty: &Type, lifetime: TokenStream) -> TokenStream {

@@ -239,6 +239,31 @@ fn access_rejects_only_exact_aligned_spans_without_changing_them() {
 }
 
 #[test]
+fn prefix_access_keeps_a_disjoint_remainder_and_boxed_storage_keeps_heap_provenance() {
+    #[repr(align(16))]
+    struct Span([u8; producer::ALL_FEATURES_LEN + 16]);
+
+    let mut span = Span([0xa5; producer::ALL_FEATURES_LEN + 16]);
+    span.0[..producer::ALL_FEATURES_LEN].copy_from_slice(fixture().as_bytes());
+    {
+        let (mut view, remainder) = AllFeatures::access_mut_prefix(&mut span.0).unwrap();
+        view.sequence_mut().set(43).unwrap();
+        remainder.fill(0x5a);
+        view.name_mut().set("zero").unwrap();
+        assert_eq!(view.name_mut().capacity(), 7);
+    }
+    let (view, remainder) = AllFeatures::access_prefix(&span.0).unwrap();
+    assert_eq!((view.sequence(), view.name()), (43, "zero"));
+    assert_eq!(remainder, &[0x5a; 16]);
+
+    let mut boxed = zero_schema::make_boxed_schema_buffer!(AllFeatures<'static>);
+    assert_eq!(boxed.as_bytes(), &[0; producer::ALL_FEATURES_LEN]);
+    boxed.as_bytes_mut().copy_from_slice(fixture().as_bytes());
+    let view = AllFeatures::access(boxed.as_bytes()).unwrap();
+    assert_eq!(view.sequence(), 0x0707_0707_0707_0707);
+}
+
+#[test]
 fn mutable_capability_reborrows_and_selected_payload_mutation_remain_valid() {
     let mut bytes = fixture();
     {
@@ -621,4 +646,101 @@ fn zero_sentinel_option_mut_uses_short_reborrows_and_clears_its_full_span() {
         }
     }
     assert!(parent_padding.iter().all(|index| bytes[*index] == 0x7b));
+}
+
+#[zero]
+#[derive(Debug, PartialEq)]
+pub struct ArrayShapes<'a> {
+    #[zero(capacity = 4)]
+    names: [&'a U16CStr; 2],
+    #[zero(capacity = 3, len_type = u8)]
+    words: [[&'a str; 2]; 2],
+    grid: [[u16; 3]; 2],
+}
+
+#[test]
+fn string_array_views_and_nested_row_handles_stay_inside_producer_storage() {
+    let mut storage = zero_schema::make_schema_buffer!(ArrayShapes<'static>);
+    {
+        let mut root = ArrayShapes::access_mut(storage.as_bytes_mut())
+            .expect("zero storage is empty strings and zero cells");
+        root.names_mut()
+            .get_mut(1)
+            .expect("second name")
+            .set(U16CStr::from_slice(&[0x61, 0x62, 0]).expect("one terminator"))
+            .expect("within capacity");
+        {
+            let mut words = root.words_mut();
+            words
+                .get_mut(1)
+                .expect("second row")
+                .get_mut(0)
+                .expect("first word")
+                .set("xyz")
+                .expect("within capacity");
+            words
+                .get_mut(0)
+                .expect("first row")
+                .set(1, "q")
+                .expect("within capacity");
+        }
+        root.grid_mut()
+            .get_mut(1)
+            .expect("second grid row")
+            .set(2, 9)
+            .expect("in range");
+    }
+
+    let before = storage.as_bytes().to_vec();
+    let storage_range = {
+        let start = storage.as_bytes().as_ptr() as usize;
+        start..start + storage.as_bytes().len()
+    };
+    let view = ArrayShapes::access(storage.as_bytes()).expect("written storage is valid");
+    let name = view.names().get(1).expect("second name");
+    assert_eq!(name.as_slice(), &[0x61, 0x62]);
+    assert!(storage_range.contains(&(name.as_ptr() as usize)));
+    let word = view
+        .words()
+        .get(1)
+        .expect("second row")
+        .get(0)
+        .expect("first word");
+    assert_eq!(word, "xyz");
+    assert!(storage_range.contains(&(word.as_ptr() as usize)));
+    let logical = view.copy_into();
+    assert_eq!(logical.words, [["", "q"], ["xyz", ""]]);
+    assert_eq!(logical.grid, [[0, 0, 0], [0, 0, 9]]);
+
+    // Failed row and whole-array mutation leave every storage byte unchanged.
+    let mut root = ArrayShapes::access_mut(storage.as_bytes_mut()).expect("still valid");
+    let error = root
+        .words_mut()
+        .set(0, ["ok", "toolong"])
+        .expect_err("second word exceeds capacity");
+    assert_kind_and_path(
+        &error,
+        ErrorKind::CapacityExceeded,
+        &[
+            ErrorPathSegment::Field("words"),
+            ErrorPathSegment::Index(0),
+            ErrorPathSegment::Index(1),
+        ],
+    );
+    let error = root
+        .words_mut()
+        .get_mut(1)
+        .expect("second row")
+        .copy_from(&["fine", "no"])
+        .expect_err("first word exceeds capacity");
+    assert_kind_and_path(
+        &error,
+        ErrorKind::CapacityExceeded,
+        &[
+            ErrorPathSegment::Field("words"),
+            ErrorPathSegment::Index(1),
+            ErrorPathSegment::Index(0),
+        ],
+    );
+    assert_eq!(storage.as_bytes(), before.as_slice());
 }

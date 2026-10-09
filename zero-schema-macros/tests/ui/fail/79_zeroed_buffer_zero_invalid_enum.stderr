@@ -1,0 +1,15 @@
+error[E0080]: evaluation of constant value failed
+  --> tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs:22:13
+   |
+22 |     let _ = zs::make_zeroed_schema_buffer!(Status);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the evaluated program panicked at '`Status::ZERO_IS_VALID` is false, so a zero-start schema buffer would not be a valid root: some field has no all-zero value (for example a scalar enum without a `= 0` variant, or a tagged payload whose zero tag has no zero-valid variant). Make that field an `Option<_>`, declare a zero variant, or use `make_schema_buffer!` and fill the bytes from the producer before `access`.', $DIR/tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs:22:13
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `zs::make_zeroed_schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation of constant value failed
+  --> tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs:23:13
+   |
+23 |     let _ = zs::make_zeroed_schema_buffer!(Mode);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the evaluated program panicked at '`Mode::ZERO_IS_VALID` is false, so a zero-start schema buffer would not be a valid root: some field has no all-zero value (for example a scalar enum without a `= 0` variant, or a tagged payload whose zero tag has no zero-valid variant). Make that field an `Option<_>`, declare a zero variant, or use `make_schema_buffer!` and fill the bytes from the producer before `access`.', $DIR/tests/ui/fail/79_zeroed_buffer_zero_invalid_enum.rs:23:13
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `zs::make_zeroed_schema_buffer` (in Nightly builds, run with -Z macro-backtrace for more info)

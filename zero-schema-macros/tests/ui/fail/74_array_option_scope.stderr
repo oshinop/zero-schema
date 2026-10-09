@@ -1,0 +1,29 @@
+error: this zero option is not applicable to this string field
+  --> tests/ui/fail/74_array_option_scope.rs:13:12
+   |
+13 |     codes: [&'a CStr; 2],
+   |            ^^^^^^^^^^^^^
+
+error: this zero option is not applicable to this string field
+  --> tests/ui/fail/74_array_option_scope.rs:19:12
+   |
+19 |     names: [&'a U16CStr; 2],
+   |            ^^^^^^^^^^^^^^^^
+
+error: nul-terminated string capacity must be nonzero
+  --> tests/ui/fail/74_array_option_scope.rs:25:12
+   |
+25 |     names: [&'a U16CStr; 2],
+   |            ^^^^^^^^^^^^^^^^
+
+error: this zero option is not applicable to this field
+  --> tests/ui/fail/74_array_option_scope.rs:32:11
+   |
+32 |     grid: [[u8; 2]; 2],
+   |           ^^^^^^^^^^^^
+
+error: this zero option is not applicable to this field
+  --> tests/ui/fail/74_array_option_scope.rs:38:11
+   |
+38 |     grid: [[u16; 2]; 2],
+   |           ^^^^^^^^^^^^^

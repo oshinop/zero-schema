@@ -1,0 +1,11 @@
+error: zero-length schema arrays are unsupported
+ --> tests/ui/fail/76_nested_zero_length_array.rs:5:17
+  |
+5 |     grid: [[u8; 0]; 2],
+  |                 ^
+
+error: zero-length schema arrays are unsupported
+  --> tests/ui/fail/76_nested_zero_length_array.rs:10:21
+   |
+10 |     grid: [[u8; 2]; 0],
+   |                     ^

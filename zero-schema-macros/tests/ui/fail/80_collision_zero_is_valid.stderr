@@ -1,0 +1,11 @@
+error: generated zero-schema name collision for `ZERO_IS_VALID`
+ --> tests/ui/fail/80_collision_zero_is_valid.rs:5:5
+  |
+5 |     ZERO_IS_VALID: u8,
+  |     ^^^^^^^^^^^^^
+
+error: generated zero-schema name collision for `ZERO_IS_VALID`
+  --> tests/ui/fail/80_collision_zero_is_valid.rs:11:5
+   |
+11 |     ZERO_IS_VALID = 0,
+   |     ^^^^^^^^^^^^^

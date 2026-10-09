@@ -63,8 +63,15 @@ mod zero_state_sealed {
     pub trait Sealed {}
 }
 
-/// Type-level classification of whether an all-zero wire representation is
-/// logically valid.
+/// Type-level classification used to reject `Option<T>` inners whose all-zero
+/// wire could be a valid present value.
+///
+/// `ZeroValid` means an all-zero wire *may* be a valid logical value and
+/// `ZeroInvalid` means it certainly cannot. For every declaration except a tagged
+/// payload the two readings coincide with the exact answer, which generated code
+/// publishes as `WireTypeSupport::ZERO_IS_VALID`; a tagged payload is classified
+/// `ZeroValid` when *any* variant payload is zero-valid, a safe over-approximation
+/// for rejecting optional inners that does not look at the external tag.
 ///
 /// This is sealed so generated code can compose states but cannot define a
 /// third state outside the protocol.
@@ -113,6 +120,16 @@ impl<T> OptionalWireType for T where T: WireTypeSupport<ZeroState = ZeroInvalid>
 pub trait WireTypeSupport: WireType {
     type Support: SchemaSupport<Wire = Self::Wire> + 'static;
     type ZeroState: ZeroState;
+
+    /// Exact compile-time answer to whether an all-zero span of `Self::SIZE` bytes
+    /// is a type-valid instance, that is, whether the generated eager proof accepts
+    /// it. The inherent `ZERO_IS_VALID` of every generated root is this constant.
+    ///
+    /// Generated records AND the constants of their nested schemas, fixed arrays
+    /// (their element's value) and tagged payloads; a scalar enum is `true` only
+    /// when a declared discriminant is zero. Primitives, Booleans, fixed bytes,
+    /// every bounded string form and `Option<T>` fields are always zero-valid.
+    const ZERO_IS_VALID: bool;
 }
 
 /// Generated support that also has a concrete logical patch representation.
@@ -137,6 +154,12 @@ pub trait TaggedPayloadTypeSupport {
     type Support: for<'wire> TaggedPayloadSupport<Tag = Self::Tag, Logical<'wire> = Self::Logical<'wire>>
         + 'static;
     type ZeroState: ZeroState;
+
+    /// Exact compile-time answer to whether an all-zero payload span, selected by
+    /// an all-zero external tag, is type-valid: some variant's tag has discriminant
+    /// zero and that variant's payload is zero-valid. A unit variant payload is
+    /// always zero-valid; an unclaimed zero tag value is not.
+    const ZERO_IS_VALID: bool;
     const LAYOUT: &'static LayoutDescriptor;
 }
 
@@ -394,6 +417,12 @@ pub trait StringMutationAdapter: InputAccess {
     type Owner: OwnerAdapter;
     type Logical: ?Sized;
 
+    /// The field's declared `#[zero(capacity = N)]`, in storage units of the
+    /// logical string: bytes for `str` and `CStr`, `u16` units for `U16Str` and
+    /// `U16CStr`. Terminated forms include their terminator; length-prefixed
+    /// forms exclude the prefix.
+    const CAPACITY: usize;
+
     fn read<'wire>(
         input: SharedInput<'wire, Self::Wire>,
     ) -> Result<&'wire Self::Logical, <Self::Owner as OwnerAdapter>::AccessError>;
@@ -591,6 +620,14 @@ pub trait TaggedPayloadPatch<S: TaggedPayloadSupport> {
 /// element range after the complete array preflight has succeeded and is
 /// therefore infallible. `index_error` and `length_error` preserve the root's
 /// concrete field/index error shape without erased runtime errors.
+///
+/// The `index` passed to `prove`, `make_mut`, `preflight*`, and `commit*` is the
+/// element's flat position among the same-depth elements of every enclosing
+/// array, so it equals the ordinary index for a field-level array and lets a
+/// leaf adapter name every enclosing index of a nested element. `read` receives
+/// the position within the viewed array: a proved read cannot fail, so the value
+/// is diagnostic only. `index_error` receives the offending index of the array
+/// that rejected it.
 #[doc(hidden)]
 pub trait ArrayElementAdapter: InputAccess {
     type Wire: FromBytes + KnownLayout + Immutable + 'static;
@@ -675,11 +712,11 @@ pub use crate::access::{ExclusiveInput, ProvedExclusive, ProvedShared, SharedInp
 
 /// Checked fixed-array offset helpers.
 #[doc(hidden)]
-pub use crate::array::{checked_element_offset, checked_element_range};
+pub use crate::array::{NestedArrayAdapter, checked_element_offset, checked_element_range};
 
 /// Allocation-free structured-error formatter for generated error displays.
 #[doc(hidden)]
-pub use crate::error::__fmt_schema_error;
+pub use crate::error::{__fmt_schema_error, FieldIndexPath, IndexLeaf, IndexNode};
 
 /// Checked range and bounded byte-write helpers.
 #[doc(hidden)]

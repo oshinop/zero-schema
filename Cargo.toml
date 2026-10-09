@@ -29,8 +29,8 @@ std = ["alloc", "zerocopy/std"]
 
 [dependencies]
 zero-schema-macros = { path = "zero-schema-macros", version = "=0.1.0" }
-zerocopy = { version = "=0.8.54", default-features = false, features = ["derive"] }
-widestring = { version = "=1.2.1", default-features = false }
+zerocopy = { version = "0.8.54", default-features = false, features = ["derive"] }
+widestring = { version = "1.2.1", default-features = false }
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "none")))'.dev-dependencies]
 zero-schema-schema-corpus = { path = "test-fixtures/schema-corpus", default-features = false }

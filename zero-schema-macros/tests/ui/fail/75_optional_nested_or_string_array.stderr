@@ -1,0 +1,17 @@
+error: Option<[T; N]> requires an all-zero-invalid scalar-enum or schema element
+  --> tests/ui/fail/75_optional_nested_or_string_array.rs:14:21
+   |
+14 |     values: Option<[[Kind; 2]; 2]>,
+   |                     ^^^^^^^^^
+
+error: Option<[T; N]> requires an all-zero-invalid scalar-enum or schema element
+  --> tests/ui/fail/75_optional_nested_or_string_array.rs:20:20
+   |
+20 |     names: Option<[&'a str; 2]>,
+   |                    ^
+
+error: Option<T> is not supported as a fixed-array element; put Option around the complete array
+  --> tests/ui/fail/75_optional_nested_or_string_array.rs:26:13
+   |
+26 |     names: [Option<&'a str>; 2],
+   |             ^^^^^^
